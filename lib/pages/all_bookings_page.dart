@@ -1,0 +1,1065 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:convert';
+import 'dart:html' as html;
+import '../layouts/app_scaffold.dart';
+import '../theme/brand_colors.dart';
+import 'package:csv/csv.dart';
+import 'package:dropdown_button2/dropdown_button2.dart';
+
+class AllBookingsPage extends StatefulWidget {
+  const AllBookingsPage({super.key});
+
+  @override
+  State<AllBookingsPage> createState() => _AllBookingsPageState();
+}
+
+class _AllBookingsPageState extends State<AllBookingsPage> {
+  final supabase = Supabase.instance.client;
+  final ScrollController _horizontalController = ScrollController();
+  bool _loading = true;
+  List<Map<String, dynamic>> _bookings = [];
+  List<String> _statusFilter = ['all'];
+  List<String> _customerFilter = ['all'];
+  List<String> _customerOptions = ['all'];
+  DateTime? _fromDate;
+  DateTime? _toDate;
+  String? _sortColumn;
+  bool _sortAscending = true;
+  String? _effectiveRole;
+  String _formatStatus(String? status) {
+    if (status == null) return '—';
+    switch (status) {
+      case 'draft':
+        return 'Draft';
+      case 'booked':
+        return 'Booked';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'received':
+        return 'Received';
+      case 'no_show':
+        return 'No Show';
+      default:
+        return status;
+    }
+  }
+  @override
+  void initState() {
+    super.initState();
+    _loadUserRole();
+  }
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadBookings() async {
+    if (!mounted) return;
+
+    setState(() {
+      _loading = true;
+    });
+
+    var query = supabase
+      .from('bookings')
+      .select(
+        'booking_id,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name)',
+      );
+
+  if (!_statusFilter.contains('all')) {
+    query = query.inFilter('status', _statusFilter);
+  }
+
+  if (!_customerFilter.contains('all')) {
+    query = query.inFilter(
+        'customers.customer_code', _customerFilter);
+  }
+
+  if (_fromDate != null) {
+    query = query.gte('start_time', _fromDate!.toUtc().toIso8601String());
+  }
+
+  if (_toDate != null) {
+    final endOfDay = DateTime(
+      _toDate!.year,
+      _toDate!.month,
+      _toDate!.day,
+      23,
+      59,
+      59,
+    );
+    query = query.lte('start_time', endOfDay.toUtc().toIso8601String());
+  }
+
+  final response = await query.order('start_time', ascending: false);
+
+    if (!mounted) return;
+
+    final bookings = List<Map<String, dynamic>>.from(response);
+
+    final customersInBookings = bookings
+        .map((b) => b['customers']?['customer_code'] as String?)
+        .where((c) => c != null && c.isNotEmpty)
+        .cast<String>()
+        .toSet()
+        .toList()
+      ..sort();
+
+    setState(() {
+      _bookings = bookings;
+      _customerOptions = ['all', ...customersInBookings];
+
+      // Ensure selected value still exists
+      if (!_customerFilter.every((c) => _customerOptions.contains(c))) {
+        _customerFilter = ['all'];
+      }
+
+      _loading = false;
+    });
+  }
+
+  void _exportToCsv() {
+    if (_bookings.isEmpty) return;
+
+    final List<List<String>> rows = [];
+
+    // Header row
+    rows.add([
+      'Site',
+      'Customer',
+      'Type',
+      'Date',
+      'Time',
+      'Reference',
+      'Status',
+    ]);
+
+    final dateFmt = DateFormat('dd/MM/yyyy');
+    final timeFmt = DateFormat('HH:mm');
+
+    for (final booking in _bookings) {
+      final startTime =
+          DateTime.parse(booking['start_time']).toUtc();
+
+      rows.add([
+        booking['sites']?['site_name'] ?? '',
+        booking['customers']?['customer_code'] ?? '',
+        booking['vehicle_types']?['name'] ?? '',
+        dateFmt.format(startTime),
+        timeFmt.format(startTime),
+        booking['reference'] ?? '',
+        _formatStatus(booking['status']),
+      ]); 
+    }
+
+    final csv = ListToCsvConverter().convert(rows);
+    final bytes = utf8.encode(csv);
+    final blob = html.Blob([bytes]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', 'bookings_export.csv')
+      ..click();
+
+    html.Url.revokeObjectUrl(url);
+  }
+
+  void _toggleSort(String column) {
+    setState(() {
+      if (_sortColumn != column) {
+        _sortColumn = column;
+        _sortAscending = true;
+      } else if (_sortAscending) {
+        _sortAscending = false;
+      } else {
+        _sortColumn = null; // third click → remove sort
+      }
+
+      _applySorting();
+    });
+  }
+
+  void _applySorting() {
+    if (_sortColumn == null) return;
+
+    _bookings.sort((a, b) {
+      dynamic aVal;
+      dynamic bVal;
+
+      switch (_sortColumn) {
+        case 'site':
+          aVal = a['sites']?['site_name'] ?? '';
+          bVal = b['sites']?['site_name'] ?? '';
+          break;
+        case 'customer':
+          aVal = a['customers']?['customer_code'] ?? '';
+          bVal = b['customers']?['customer_code'] ?? '';
+          break;
+        case 'type':
+          aVal = a['vehicle_types']?['name'] ?? '';
+          bVal = b['vehicle_types']?['name'] ?? '';
+          break;
+        case 'date':
+          aVal = DateTime.parse(a['start_time']);
+          bVal = DateTime.parse(b['start_time']);
+          break;
+        case 'time':
+          aVal = DateTime.parse(a['start_time']);
+          bVal = DateTime.parse(b['start_time']);
+          break;
+        case 'reference':
+          aVal = a['reference'] ?? '';
+          bVal = b['reference'] ?? '';
+          break;
+        case 'status':
+          aVal = a['status'] ?? '';
+          bVal = b['status'] ?? '';
+          break;
+        default:
+          return 0;
+      }
+
+      int result;
+
+      if (aVal is Comparable && bVal is Comparable) {
+        result = aVal.compareTo(bVal);
+      } else {
+        result = 0;
+      }
+
+      return _sortAscending ? result : -result;
+    });
+  }
+
+  Future<void> _pickFromDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fromDate ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (picked != null) {
+      setState(() => _fromDate = picked);
+      _loadBookings();
+    }
+  }
+
+  Future<void> _pickToDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _toDate ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+
+    if (picked != null) {
+      setState(() => _toDate = picked);
+      _loadBookings();
+    }
+  }
+
+  Future<void> _openCreateBooking() async {
+    final result = await Navigator.pushNamed(
+      context,
+      '/booking-form',
+    );
+
+    if (!mounted) return;
+
+    if (result == 'confirmed') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Booking confirmed successfully.'),
+        ),
+      );
+    } else if (result == 'draft') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Booking saved to drafts.'),
+        ),
+      );
+    } else if (result == 'discarded') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Booking discarded.'),
+        ),
+      );
+    }
+
+    await _loadBookings();
+  }
+
+  Future<void> _openEditBooking(String bookingId) async {
+    final result = await Navigator.pushNamed(
+      context,
+      '/booking-form',
+      arguments: {'booking_id': bookingId},
+    );
+
+    if (!mounted) return;
+
+    if (result == 'confirmed') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Booking updated successfully.'),
+        ),
+      );
+    } else if (result == 'draft') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Draft updated successfully.'),
+        ),
+      );
+    } else if (result == 'discarded') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Changes discarded.'),
+        ),
+      );
+    }
+
+    await _loadBookings();
+  }
+
+  Future<void> _downloadPackingList(String? path) async {
+    if (path == null || path.isEmpty) return;
+
+    try {
+      final signedUrl = await supabase.storage
+          .from('booking-documents')
+          .createSignedUrl(path, 60);
+
+      final uri = Uri.parse(signedUrl);
+
+      final anchor = html.AnchorElement(href: uri.toString())
+        ..setAttribute('download', '')
+        ..click();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _loadUserRole() async {
+    final session = supabase.auth.currentSession;
+    if (session == null) return;
+
+    final userId = session.user.id;
+
+    final roles = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId);
+
+    if (roles.isEmpty) return;
+
+    // Your system resolves by first role (same as ProfilePage)
+    final role = roles.first['role'] as String;
+
+    setState(() {
+      _effectiveRole = role;
+    });
+
+    await _loadBookings();
+  }
+
+  bool get _canUpdateStatus =>
+    _effectiveRole == 'internal_admin' ||
+    _effectiveRole == 'internal_user';
+  
+  List<String> _availableStatuses() {
+    final statuses = [
+      'all',
+      'booked',
+      'cancelled',
+      'draft',
+      'received',
+      'no_show',
+    ];
+    if (_effectiveRole == 'internal_admin' ||
+        _effectiveRole == 'internal_user') {
+      statuses.remove('draft');
+    }
+    return statuses;
+  }
+
+  Future<void> _openUpdateStatusDialog(
+      Map<String, dynamic> booking) async {
+    String selectedStatus = 'received';
+    TimeOfDay? arrivalTime;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Update Booking Status'),
+          content: StatefulBuilder(
+            builder: (context, setLocalState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+
+                  DropdownButton<String>(
+                    value: selectedStatus,
+                    items: const [
+                      DropdownMenuItem(
+                          value: 'received',
+                          child: Text('Received')),
+                      DropdownMenuItem(
+                          value: 'no_show',
+                          child: Text('No Show')),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setLocalState(() {
+                        selectedStatus = value;
+                      });
+                    },
+                  ),
+
+                  if (selectedStatus == 'received')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final picked =
+                              await showTimePicker(
+                            context: context,
+                            initialTime:
+                                TimeOfDay.now(),
+                          );
+                          if (picked != null) {
+                            setLocalState(() {
+                              arrivalTime = picked;
+                            });
+                          }
+                        },
+                        child: Text(
+                          arrivalTime == null
+                              ? 'Select Arrival Time'
+                              : 'Arrival: ${arrivalTime!.format(context)}',
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (selectedStatus ==
+                        'received' &&
+                    arrivalTime == null) {
+                  return;
+                }
+
+                final startTime =
+                    DateTime.parse(
+                        booking['start_time']);
+
+                DateTime? arrivedAt;
+                if (selectedStatus == 'received') {
+                  final pickedTime = arrivalTime;
+                  if (pickedTime == null) return;
+                  final startTime =
+                      DateTime.parse(booking['start_time']);
+                  arrivedAt = DateTime(
+                    startTime.year,
+                    startTime.month,
+                    startTime.day,
+                    pickedTime.hour,
+                    pickedTime.minute,
+                  ).toUtc();
+                }
+
+                await supabase
+                    .from('bookings')
+                    .update({
+                      'status': selectedStatus,
+                      'arrived_at':
+                          arrivedAt?.toIso8601String(),
+                    })
+                    .eq('booking_id',
+                        booking['booking_id']);
+
+                if (!mounted) return;
+
+                Navigator.pop(context);
+                await _loadBookings();
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _confirmCancel(int index) {
+    final booking = _bookings[index];
+    final bookingId = booking['booking_id'];
+
+    if (bookingId == null) {
+      throw Exception('booking_id missing from booking row: $booking');
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Booking'),
+        content: const Text('Are you sure you want to cancel this booking?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+
+              await supabase
+                  .from('bookings')
+                  .update({
+                    'status': 'cancelled',
+                    'updated_at': DateTime.now().toUtc().toIso8601String(),
+                  })
+                  .eq('booking_id', bookingId);
+
+              await _loadBookings();
+            },
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppScaffold(
+      title: 'All Bookings',
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeaderActions(),
+            const SizedBox(height: 24),
+            Expanded(
+              child: _buildBookingsTable(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderActions() {
+    final dateFmt = DateFormat('dd/MM/yyyy');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'All Deliveries:',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        Row(
+          children: [
+
+            // ───────── STATUS FILTER ─────────
+            const Text(
+              'Filter by Status:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 12),
+
+            SizedBox(
+              width: 220,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton2<String>(
+                  isExpanded: true,
+                  hint: Text(
+                    _statusFilter.contains('all')
+                        ? 'All'
+                        : _statusFilter.join(', '),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  buttonStyleData: const ButtonStyleData(
+                    height: 36,
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 300,
+                  ),
+                  menuItemStyleData: const MenuItemStyleData(
+                    height: 32,
+                  ),
+                  items: _availableStatuses().map((status) {
+                    return DropdownMenuItem<String>(
+                      value: status,
+                      enabled: false,
+                      child: StatefulBuilder(
+                        builder: (context, menuSetState) {
+                          final isSelected =
+                              _statusFilter.contains(status);
+
+                          return InkWell(
+                            onTap: () {
+                              if (status == 'all') {
+                                setState(() {
+                                  _statusFilter = ['all'];
+                                });
+                              } else {
+                                setState(() {
+                                  _statusFilter.remove('all');
+
+                                  if (isSelected) {
+                                    _statusFilter.remove(status);
+                                  } else {
+                                    _statusFilter.add(status);
+                                  }
+
+                                  if (_statusFilter.isEmpty) {
+                                    _statusFilter = ['all'];
+                                  }
+                                });
+                              }
+
+                              _loadBookings();
+                              menuSetState(() {});
+                            },
+                            child: Row(
+                              children: [
+                                Checkbox(
+                                  value: isSelected,
+                                  onChanged: (_) {},
+                                ),
+                                Text(status),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  }).toList(),
+                  value: null,
+                  onChanged: (_) {},
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 24),
+
+            // ───────── CUSTOMER FILTER ─────────
+            const Text(
+              'Customer:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 12),
+
+            SizedBox(
+              width: 220,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton2<String>(
+                  isExpanded: true,
+                  hint: Text(
+                    _customerFilter.contains('all')
+                        ? 'All'
+                        : _customerFilter.join(', '),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  buttonStyleData: const ButtonStyleData(
+                    height: 36,
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 300,
+                  ),
+                  menuItemStyleData: const MenuItemStyleData(
+                    height: 32,
+                  ),
+                  items: _customerOptions.map((customer) {
+                    return DropdownMenuItem<String>(
+                      value: customer,
+                      enabled: false,
+                      child: StatefulBuilder(
+                        builder: (context, menuSetState) {
+                          final isSelected =
+                              _customerFilter.contains(customer);
+
+                          return InkWell(
+                            onTap: () {
+                              if (customer == 'all') {
+                                setState(() {
+                                  _customerFilter = ['all'];
+                                });
+                              } else {
+                                setState(() {
+                                  _customerFilter.remove('all');
+
+                                  if (isSelected) {
+                                    _customerFilter.remove(customer);
+                                  } else {
+                                    _customerFilter.add(customer);
+                                  }
+
+                                  if (_customerFilter.isEmpty) {
+                                    _customerFilter = ['all'];
+                                  }
+                                });
+                              }
+
+                              _loadBookings();
+                              menuSetState(() {});
+                            },
+                            child: Row(
+                              children: [
+                                Checkbox(
+                                  value: isSelected,
+                                  onChanged: (_) {},
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    customer == 'all'
+                                        ? 'All'
+                                        : customer,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  }).toList(),
+                  value: null,
+                  onChanged: (_) {},
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 24),
+
+            // ───────── DATE FROM ─────────
+            OutlinedButton(
+              onPressed: _pickFromDate,
+              child: Text(
+                _fromDate == null
+                    ? 'Date From:'
+                    : 'Date From: ${dateFmt.format(_fromDate!)}',
+              ),
+            ),
+
+            const SizedBox(width: 24),
+
+            // ───────── DATE TO ─────────
+            OutlinedButton(
+              onPressed: _pickToDate,
+              child: Text(
+                _toDate == null
+                    ? 'Date To:'
+                    : 'Date To: ${dateFmt.format(_toDate!)}',
+              ),
+            ),
+
+            const SizedBox(width: 24),
+
+            // ───────── EXPORT ─────────
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: BrandColors.lightBlue,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: _exportToCsv,
+              icon: const Icon(Icons.download),
+              label: const Text('Export CSV'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBookingsTable() {
+    final dateFmt = DateFormat('dd/MM/yyyy');
+    final timeFmt = DateFormat('HH:mm');
+
+    const double siteW = 150;
+    const double customerW = 200;
+    const double typeW = 300;
+    const double dateW = 200;
+    const double timeW = 100;
+    const double refW = 200;
+    const double statusW = 200;
+    const double actionW = 400;
+
+    const double tableWidth =
+    siteW +
+    customerW +
+    typeW +
+    dateW +
+    timeW +
+    refW +
+    statusW +
+    actionW;
+
+    Widget headerCell(String text, double width, String columnKey) {
+      final isActive = _sortColumn == columnKey;
+
+      return SizedBox(
+        width: width,
+        child: InkWell(
+          onTap: () => _toggleSort(columnKey),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Text(
+                  text,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (isActive)
+                  Icon(
+                    _sortAscending
+                        ? Icons.arrow_drop_up
+                        : Icons.arrow_drop_down,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget dataCell(String text, double width) {
+      return SizedBox(
+        width: width,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            text,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
+
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Scrollbar(
+      controller: _horizontalController,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        controller: _horizontalController,
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: tableWidth,
+          child: Column(
+            children: [
+
+              // 🔹 HEADER
+              Container(
+                color: BrandColors.lightBlue,
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                ), // removed horizontal padding (was causing +24px overflow)
+                child: Row(
+                  children: [
+                    headerCell('Site', siteW, 'site'),
+                    headerCell('Customer', customerW, 'customer'),
+                    headerCell('Type', typeW, 'type'),
+                    headerCell('Date', dateW, 'date'),
+                    headerCell('Time', timeW, 'time'),
+                    headerCell('Reference', refW, 'reference'),
+                    headerCell('Status', statusW, 'status'),
+                    headerCell('Action', actionW, 'action'),
+                  ],
+                ),
+              ),
+
+              // 🔹 BODY
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: List.generate(_bookings.length, (index) {
+                      final booking = _bookings[index];
+                      final startTime =
+                          DateTime.parse(booking['start_time']).toUtc();
+
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 8,
+                        ), // removed horizontal padding (fixes 24px overflow)
+                        decoration: const BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: Colors.black12,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            dataCell(
+                                booking['sites']?['site_name'] ?? '—',
+                                siteW),
+                            dataCell(
+                                booking['customers']?['customer_code'] ?? '—',
+                                customerW),
+                            dataCell(
+                                booking['vehicle_types']?['name'] ?? '—',
+                                typeW),
+                            dataCell(
+                                dateFmt.format(startTime),
+                                dateW),
+                            dataCell(
+                                timeFmt.format(startTime),
+                                timeW),
+                            dataCell(
+                                booking['reference'] ?? '',
+                                refW),
+                            dataCell(
+                                _formatStatus(booking['status']),
+                                statusW),
+                            SizedBox(
+                              width: actionW,
+                              child: Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: [
+                                  // Update Status
+                                  if (booking['status'] != 'received' &&
+                                      booking['status'] != 'cancelled' &&
+                                      booking['status'] != 'draft')
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: BrandColors.orange,
+                                        foregroundColor: BrandColors.charcoal,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 6,
+                                        ),
+                                        textStyle: const TextStyle(fontSize: 12),
+                                        minimumSize: const Size(0, 30),
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        elevation: 0,
+                                      ),
+                                      onPressed: () => _openUpdateStatusDialog(booking),
+                                      child: const Text('Update Status'),
+                                    ),
+
+                                  // EDIT
+                                  if (booking['status'] != 'received' &&
+                                      booking['status'] != 'cancelled')
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: BrandColors.orange,
+                                      foregroundColor: BrandColors.charcoal,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 6,
+                                      ),
+                                      textStyle: const TextStyle(fontSize: 12),
+                                      minimumSize: const Size(0, 30),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      elevation: 0,
+                                    ),
+                                    onPressed: () =>
+                                        _openEditBooking(booking['booking_id']),
+                                    child: const Text('Edit'),
+                                  ),
+
+                                  // CANCEL
+                                  if (booking['status'] != 'received' &&
+                                      booking['status'] != 'cancelled')
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: BrandColors.red,
+                                      foregroundColor: BrandColors.charcoal,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 6,
+                                      ),
+                                      textStyle: const TextStyle(fontSize: 12),
+                                      minimumSize: const Size(0, 30),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      elevation: 0,
+                                    ),
+                                    onPressed: () =>
+                                        _confirmCancel(index),
+                                    child: const Text('Cancel'),
+                                  ),
+
+                                  // DOWNLOAD
+                                  if (booking['status'] != 'cancelled' &&
+                                      booking['packing_list_path'] != null &&
+                                      booking['packing_list_path']
+                                          .toString()
+                                          .isNotEmpty)
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: BrandColors.green,
+                                        foregroundColor: BrandColors.charcoal,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 6,
+                                        ),
+                                        textStyle:
+                                            const TextStyle(fontSize: 12),
+                                        minimumSize:
+                                            const Size(0, 30),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                        elevation: 0,
+                                      ),
+                                      onPressed: () =>
+                                          _downloadPackingList(
+                                            booking['packing_list_path'],
+                                          ),
+                                      child: const Text('Download'),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
