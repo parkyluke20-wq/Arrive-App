@@ -111,11 +111,16 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
     setState(() {
       _bookings = bookings;
-      _customerOptions = ['all', ...customersInBookings];
+      if (customersInBookings.length == 1) {
+        // Only one customer available → hard lock to it
+        _customerOptions = customersInBookings;
+        _customerFilter = [customersInBookings.first];
+      } else {
+        _customerOptions = ['all', ...customersInBookings];
 
-      // Ensure selected value still exists
-      if (!_customerFilter.every((c) => _customerOptions.contains(c))) {
-        _customerFilter = ['all'];
+        if (!_customerFilter.every((c) => _customerOptions.contains(c))) {
+          _customerFilter = ['all'];
+        }
       }
 
       _loading = false;
@@ -601,7 +606,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                   hint: Text(
                     _statusFilter.contains('all')
                         ? 'All'
-                        : _statusFilter.join(', '),
+                        : _statusFilter.map(_formatStatus).join(', '),
                     overflow: TextOverflow.ellipsis,
                   ),
                   buttonStyleData: const ButtonStyleData(
@@ -654,7 +659,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                   value: isSelected,
                                   onChanged: (_) {},
                                 ),
-                                Text(status),
+                                Text(_formatStatus(status)),
                               ],
                             ),
                           );
@@ -954,7 +959,8 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                 runSpacing: 4,
                                 children: [
                                   // Update Status
-                                  if (booking['status'] != 'received' &&
+                                  if (_canUpdateStatus &&
+                                      booking['status'] != 'received' &&
                                       booking['status'] != 'cancelled' &&
                                       booking['status'] != 'draft')
                                     ElevatedButton(

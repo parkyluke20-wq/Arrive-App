@@ -22,6 +22,7 @@ class _InboundOverviewPageState
 
   bool _loading = true;
   List<Map<String, dynamic>> _bookings = [];
+  bool _didHandleRouteArgs = false;
   String _formatStatus(String? status) {
     if (status == null) return '—';
     return status.replaceAll('_', ' ').split(' ')
@@ -33,6 +34,35 @@ class _InboundOverviewPageState
   void initState() {
     super.initState();
     _loadBookings();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    if (_didHandleRouteArgs) return;
+    _didHandleRouteArgs = true;
+
+    final args =
+    ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+
+      if (args != null && args['booking_confirmed'] == true) {
+      final wasEdit = args['was_edit'] == true;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              wasEdit
+                  ? 'Booking updated successfully'
+                  : 'Booking confirmed successfully',
+            ),
+          ),
+        );
+      });
+    } 
   }
 
   @override
@@ -95,7 +125,7 @@ class _InboundOverviewPageState
             'booking_id,start_time,reference,status,carrier,qty_pallets,qty_cases,packing_list_path,vehicle_types(name),customers(customer_code),sites(site_name)')
         .eq('status', 'booked')
         .gt('start_time', now.toIso8601String())
-        .order('start_time');
+        .order('start_time', ascending: true);
 
     if (!mounted) return;
 

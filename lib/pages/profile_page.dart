@@ -82,7 +82,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
       final roles = await supabase
           .from('user_roles')
-          .select('role, scope_type_id')
+          .select('role, scope_type, scope_type_id')
           .eq('user_id', currentUserId);
 
       if (roles.isEmpty) throw Exception('No roles assigned');
@@ -130,26 +130,50 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<List<Map<String, dynamic>>> _loadCustomersForRole(
     List<dynamic> roles,
   ) async {
-    if (effectiveRole == EffectiveRole.internalAdmin) {
+    final customerIds = <int>{};
+    final siteIds = <int>{};
+    bool isGlobal = false;
+
+    for (final r in roles) {
+      if (r['scope_type'] == 'global') {
+        isGlobal = true;
+      }
+      if (r['scope_type'] == 'customer') {
+        customerIds.add(r['scope_type_id']);
+      }
+      if (r['scope_type'] == 'site') {
+        siteIds.add(r['scope_type_id']);
+      }
+    }
+
+    if (isGlobal) {
       return await supabase
           .from('customers')
           .select('customer_id, customer_name')
-          .eq('active', true);
+          .eq('active', true)
+          .order('customer_name');
     }
 
-    final ids = roles
-        .map((r) => r['scope_type_id'])
-        .whereType<int>()
-        .toSet()
-        .toList();
+    // 🔹 SITE-SCOPED USERS
+    if (siteIds.isNotEmpty) {
+      final cs = await supabase
+          .from('customer_sites')
+          .select('customer_id')
+          .inFilter('site_id', siteIds.toList());
 
-    if (ids.isEmpty) return [];
+      customerIds.addAll(
+        cs.map((r) => r['customer_id'] as int),
+      );
+    }
+
+    if (customerIds.isEmpty) return [];
 
     return await supabase
         .from('customers')
         .select('customer_id, customer_name')
-        .filter('customer_id', 'in', '(${ids.join(',')})')
-        .eq('active', true);
+        .inFilter('customer_id', customerIds.toList())
+        .eq('active', true)
+        .order('customer_name');
   }
 
   // ---------------------------------------------------------------------------
@@ -301,8 +325,8 @@ class _ProfilePageState extends State<ProfilePage> {
     final isSelf = member['user_id'] == currentUserId;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         border: Border.all(color: Colors.grey.shade300),
         borderRadius: BorderRadius.circular(6),
@@ -319,6 +343,10 @@ class _ProfilePageState extends State<ProfilePage> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: BrandColors.orange,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: const TextStyle(fontSize: 12),
               ),
               onPressed: () => _upgradeToAdmin(member),
               child: const Text('Upgrade'),
@@ -329,6 +357,10 @@ class _ProfilePageState extends State<ProfilePage> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: BrandColors.red,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: const TextStyle(fontSize: 12),
               ),
               onPressed: () => _removeMember(member),
               child: const Text('Remove'),
@@ -454,15 +486,13 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return AppScaffold(
       title: 'Profile',
-      body: Scrollbar(
-        controller: _scrollController,
-        thumbVisibility: true,
-        child: SingleChildScrollView(
-          controller: _scrollController,
+      body: Padding(
           padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Column(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
@@ -578,8 +608,16 @@ class _ProfilePageState extends State<ProfilePage> {
                           backgroundColor: BrandColors.green,
                           foregroundColor: BrandColors.charcoal,
                         ),
-                        onPressed: _inviteUser,
+                        onPressed: null,
                         child: const Text('Invite'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'Coming soon...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
                       ),
                     ),
                   ],
@@ -591,7 +629,21 @@ class _ProfilePageState extends State<ProfilePage> {
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                ...members.map(_memberRow),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 16),
+                    child: Scrollbar(
+                      controller: _scrollController,
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _scrollController,
+                        child: Column(
+                          children: members.map(_memberRow).toList(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -610,6 +662,11 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
+  }
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   void _snack(String message) {

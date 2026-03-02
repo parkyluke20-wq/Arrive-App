@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/brand_colors.dart';
 
-class AppScaffold extends StatelessWidget {
+class AppScaffold extends StatefulWidget {
   final String title;
   final Widget body;
   final Widget? bottomActions;
@@ -15,6 +15,38 @@ class AppScaffold extends StatelessWidget {
     this.bottomActions,
     this.showFooter = true,
   });
+
+  @override
+  State<AppScaffold> createState() => _AppScaffoldState();
+}
+
+class _AppScaffoldState extends State<AppScaffold> {
+  String? _effectiveRole;
+  bool _loadingRole = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRole();
+  }
+
+  Future<void> _loadRole() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) return;
+
+    final roles = await Supabase.instance.client
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', session.user.id);
+
+    if (roles.isNotEmpty) {
+      _effectiveRole = roles.first['role'];
+    }
+
+    if (mounted) {
+      setState(() => _loadingRole = false);
+    }
+  }
 
   Future<void> _logout(BuildContext context) async {
     await Supabase.instance.client.auth.signOut();
@@ -36,7 +68,6 @@ class AppScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       drawerScrimColor: Colors.transparent,
-
       drawer: Drawer(
         backgroundColor: BrandColors.lightgrey,
         child: Column(
@@ -56,10 +87,12 @@ class AppScaffold extends StatelessWidget {
               onTap: () => _go(context, '/booking-form'),
             ),
 
-            ListTile(
-              title: const Text('Make a Reservation'),
-              onTap: () => _go(context, '/reserve-slots'),
-            ),
+            if (_effectiveRole == 'internal_admin' ||
+                _effectiveRole == 'internal_user')
+              ListTile(
+                title: const Text('Make a Reservation'),
+                onTap: () => _go(context, '/reserve-slots'),
+              ),
 
             ListTile(
               title: const Text('Inbound Overview'),
@@ -106,7 +139,7 @@ class AppScaffold extends StatelessWidget {
             fontSize: 32,
             fontWeight: FontWeight.w600,
           ),
-          title: Text(title),
+          title: Text(widget.title),
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: 24, top: 10),
@@ -121,19 +154,19 @@ class AppScaffold extends StatelessWidget {
         ),
       ),
 
-      body: body,
+      body: widget.body,
 
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (bottomActions != null)
+          if (widget.bottomActions != null)
             Container(
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
               alignment: Alignment.centerRight,
-              child: bottomActions,
+              child: widget.bottomActions,
             ),
 
-          if (showFooter)
+          if (widget.showFooter)
             const SizedBox(
               height: 60,
               child: Padding(

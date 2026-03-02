@@ -29,9 +29,13 @@ class BookingController extends ChangeNotifier {
 
   final Set<DateTime> bookableDates = {};
   final List<DateTime> availableStartTimes = [];
+  final Map<int, Map<String, bool>> _slotVisibilityByPool = {};
+  Set<String> _currentEligiblePools = {};
 
   bool computingDates = false;
   bool computingTimes = false;
+  int _dateComputeVersion = 0;
+  int _timeComputeVersion = 0;
 
   // ---------------- INTENT METHODS ----------------
 
@@ -72,11 +76,16 @@ class BookingController extends ChangeNotifier {
   // ---------------- AVAILABILITY ----------------
 
   Future<void> computeBookableDates() async {
+    if (supabase.auth.currentSession == null) {
+      return;
+    }
     if (selectedCustomer == null ||
         selectedSite == null ||
         selectedVehicleType == null) {
       return;
     }
+
+    final int requestVersion = ++_dateComputeVersion;
 
     computingDates = true;
     bookableDates.clear();
@@ -89,25 +98,46 @@ class BookingController extends ChangeNotifier {
     );
 
     if (pools.isEmpty) {
+      if (requestVersion != _dateComputeVersion) return;
       computingDates = false;
       notifyListeners();
       return;
     }
 
     final nowUtc = DateTime.now().toUtc();
-    final from = nowUtc.subtract(const Duration(days: 1));
-    final to = from.add(const Duration(days: 60));
+
+    final startOfToday =
+        DateTime.utc(nowUtc.year, nowUtc.month, nowUtc.day);
+
+    final from = startOfToday.subtract(const Duration(days: 1));
+    final to = startOfToday.add(const Duration(days: 60));
     final rows = await availabilityService.availabilityRows(
       siteId: selectedSite!,
       from: from,
       to: to,
     );
 
+    _slotVisibilityByPool.clear();
+    for (final r in rows) {
+      final startUtc = DateTime.parse(r['slot_start']).toUtc();
+      final key = startUtc.millisecondsSinceEpoch;
+      final poolId = r['pool_id'] as String;
+      final visible = r['visible'] == true;
+
+      _slotVisibilityByPool.putIfAbsent(key, () => {});
+      _slotVisibilityByPool[key]![poolId] = visible;
+    }
+
     final result = availabilityService.computeBookableDates(
       rows: rows,
       allowedPools: pools,
       requiredSlots: selectedVehicleType.slotUnitsRequired,
     );
+
+    // 🔒 IMPORTANT: Ignore stale responses
+    if (requestVersion != _dateComputeVersion) {
+      return;
+    }
 
     bookableDates
       ..clear()
@@ -125,6 +155,8 @@ class BookingController extends ChangeNotifier {
       return;
     }
 
+    final int requestVersion = ++_timeComputeVersion;
+
     computingTimes = true;
     availableStartTimes.clear();
     notifyListeners();
@@ -136,10 +168,13 @@ class BookingController extends ChangeNotifier {
     );
 
     if (pools.isEmpty) {
+      if (requestVersion != _timeComputeVersion) return;
       computingTimes = false;
       notifyListeners();
       return;
     }
+
+    _currentEligiblePools = pools;
 
     final from = DateTime.utc(
       selectedDate!.year,
@@ -155,11 +190,28 @@ class BookingController extends ChangeNotifier {
       to: to,
     );
 
+    _slotVisibilityByPool.clear();
+
+    for (final r in rows) {
+      final startUtc = DateTime.parse(r['slot_start']).toUtc();
+      final key = startUtc.millisecondsSinceEpoch;
+      final poolId = r['pool_id'] as String;
+      final visible = r['visible'] == true;
+
+      _slotVisibilityByPool.putIfAbsent(key, () => {});
+      _slotVisibilityByPool[key]![poolId] = visible;
+    }
+
+
     final result = availabilityService.computeStartTimes(
       rows: rows,
       allowedPools: pools,
       requiredSlots: selectedVehicleType.slotUnitsRequired,
     );
+
+    if (requestVersion != _timeComputeVersion) {
+      return;
+    }
 
     availableStartTimes
       ..clear()
@@ -168,8 +220,6 @@ class BookingController extends ChangeNotifier {
     computingTimes = false;
     notifyListeners();
   }
-
-  // ---------------- EDIT HYDRATION ----------------
 
   Future<HydratedBookingResult> hydrateForEdit({
     required String bookingId,
@@ -226,6 +276,20 @@ class BookingController extends ChangeNotifier {
     selectedDate = null;
     selectedStartTime = null;
     availableStartTimes.clear();
+  }
+
+  bool isSlotVisible(DateTime t) {
+    final key = t.millisecondsSinceEpoch;
+    final poolMap = _slotVisibilityByPool[key];
+    if (poolMap == null) return false;
+
+    for (final poolId in _currentEligiblePools) {
+      if (poolMap[poolId] == true) {
+        return true; // ANY eligible pool true wins
+      }
+    }
+
+    return false;
   }
 
   void clearSelectedDateAndTime() {

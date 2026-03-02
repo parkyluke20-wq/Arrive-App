@@ -22,8 +22,8 @@ class BookingAvailabilityService {
         .eq('is_allowed', true)
         .eq('load_type', loadType);
 
-    final pools = rows.map((r) => r['pool_id'].toString()).toSet();
-
+    final pools =
+        rows.map((r) => r['pool_id'].toString()).toSet();
     return pools;
   }
 
@@ -35,13 +35,27 @@ class BookingAvailabilityService {
     required int siteId,
     required DateTime from,
     required DateTime to,
-  }) {
-    return supabase
-        .from('time_slot_availability')
-        .select('pool_id, slot_start, slot_status')
-        .eq('site_id', siteId)
-        .gte('slot_start', from)
-        .lt('slot_start', to);
+  }) async {
+    final fromIso = from.toUtc().toIso8601String();
+    final toIso = to.toUtc().toIso8601String();
+
+    final response = await supabase
+      .from('slot_availability_projection')
+      .select('pool_id, slot_start, slot_status, visible')
+      .eq('site_id', siteId)
+      .gte('slot_start', fromIso)
+      .lt('slot_start', toIso)
+      .order('slot_start', ascending: true)
+      .range(0, 5000);
+
+    return List<Map<String, dynamic>>.from(response).map((r) {
+      return {
+        'pool_id': r['pool_id'].toString(),
+        'slot_start': r['slot_start'],
+        'slot_status': r['slot_status'],
+        'visible': r['visible'],
+      };
+    }).toList();
   }
 
   // ------------------------------------------------------------
@@ -53,19 +67,17 @@ class BookingAvailabilityService {
     required Set<String> allowedPools,
     required int requiredSlots,
   }) {
-
-    // 🔒 Rolling 24-hour rule
     final DateTime minAllowed =
         DateTime.now().toUtc().add(const Duration(hours: 24));
 
     final Set<DateTime> bookableDates = {};
+    final Map<DateTime, Map<String, List<DateTime>>> byDay = {};
 
-    /// day (UTC midnight) → pool → slots
-    final Map<DateTime, Map<String, List<Map<String, dynamic>>>> byDay = {};
-
-    // -------- GROUP ROWS --------
+    // GROUP ROWS
 
     for (final r in rows) {
+      if (r['slot_status'] != 'available') continue;
+
       final poolId = r['pool_id'].toString();
       if (!allowedPools.contains(poolId)) continue;
 
@@ -75,56 +87,38 @@ class BookingAvailabilityService {
       final DateTime day =
           DateTime.utc(start.year, start.month, start.day);
 
-      final bool isAvailable =
-          r['slot_status'] == 'available';
-
       byDay
           .putIfAbsent(day, () => {})
           .putIfAbsent(poolId, () => [])
-          .add({
-            'time': start,
-            'available': isAvailable,
-          });
+          .add(start);
     }
 
-    // -------- EVALUATE EACH DAY --------
+    // EVALUATE EACH DAY
 
     for (final entry in byDay.entries) {
-      final day = entry.key;
+      final DateTime day = entry.key;
       bool dayBookable = false;
 
       for (final poolEntry in entry.value.entries) {
-        final poolId = poolEntry.key;
-        final slots = poolEntry.value;
+        final List<DateTime> originalSlots = poolEntry.value;
 
-        if (slots.isEmpty) continue;
+        if (originalSlots.length < requiredSlots) continue;
 
-        slots.sort(
-          (a, b) =>
-              (a['time'] as DateTime)
-                  .compareTo(b['time'] as DateTime),
-        );
+        final List<DateTime> slots =
+            List<DateTime>.from(originalSlots)..sort();
 
         int run = 0;
         DateTime? lastTime;
 
-        for (final slot in slots) {
-          final DateTime time =
-              slot['time'] as DateTime;
-
-          final bool ok =
-              slot['available'] == true &&
-              !time.isBefore(minAllowed);
-
-          if (!ok) {
+        for (final DateTime time in slots) {
+          if (time.isBefore(minAllowed)) {
             run = 0;
             lastTime = null;
             continue;
           }
 
           if (lastTime == null ||
-              time.difference(lastTime) !=
-                  const Duration(minutes: 30)) {
+              time.difference(lastTime).inMinutes != 30) {
             run = 1;
           } else {
             run++;
@@ -143,18 +137,13 @@ class BookingAvailabilityService {
 
       if (dayBookable) {
         bookableDates.add(day);
-      } else {
       }
     }
-
-    for (final d in bookableDates.toList()..sort()) {
-    }
-
     return bookableDates;
   }
 
   // ------------------------------------------------------------
-  // START TIMES (UNCHANGED, BUT LOGGED)
+  // COMPUTE START TIMES
   // ------------------------------------------------------------
 
   List<DateTime> computeStartTimes({
@@ -162,7 +151,6 @@ class BookingAvailabilityService {
     required Set<String> allowedPools,
     required int requiredSlots,
   }) {
-
     final Map<String, List<DateTime>> byPool = {};
 
     for (final r in rows) {
@@ -171,7 +159,8 @@ class BookingAvailabilityService {
       final poolId = r['pool_id'].toString();
       if (!allowedPools.contains(poolId)) continue;
 
-      final DateTime start = DateTime.parse(r['slot_start']).toUtc();
+      final DateTime start =
+          DateTime.parse(r['slot_start']).toUtc();
 
       byPool.putIfAbsent(poolId, () => []);
       byPool[poolId]!.add(start);
@@ -180,15 +169,18 @@ class BookingAvailabilityService {
     final Set<DateTime> starts = {};
 
     for (final poolEntry in byPool.entries) {
-      final slots = poolEntry.value;
-      if (slots.length < requiredSlots) continue;
+      final List<DateTime> originalSlots = poolEntry.value;
+      if (originalSlots.length < requiredSlots) continue;
 
-      slots.sort();
+      final List<DateTime> slots =
+          List<DateTime>.from(originalSlots)..sort();
+
       List<DateTime> run = [];
 
-      for (final s in slots) {
+      for (final DateTime s in slots) {
         if (run.isEmpty ||
-            s.difference(run.last) == const Duration(minutes: 30)) {
+            s.difference(run.last) ==
+                const Duration(minutes: 30)) {
           run.add(s);
         } else {
           _extractStarts(run, requiredSlots, starts);

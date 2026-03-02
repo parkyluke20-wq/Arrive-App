@@ -209,27 +209,52 @@ class _BookingFormPageState extends State<BookingFormPage> {
         .eq('user_id', user.id);
 
     final customerIds = <int>{};
+    final siteIds = <int>{};
     bool isGlobal = false;
 
     for (final r in roles) {
-      if (r['scope_type'] == 'global') isGlobal = true;
+      if (r['scope_type'] == 'global') {
+        isGlobal = true;
+      }
+
       if (r['scope_type'] == 'customer') {
         customerIds.add(r['scope_type_id']);
       }
+
+      if (r['scope_type'] == 'site') {
+        siteIds.add(r['scope_type_id']);
+      }
     }
 
-    final rows = isGlobal
-        ? await supabase
-            .from('customers')
-            .select('customer_id, customer_name')
-            .eq('active', true)
-            .order('customer_name')
-        : await supabase
+    List<Map<String, dynamic>> rows;
+    if (isGlobal) {
+      rows = await supabase
+          .from('customers')
+          .select('customer_id, customer_name')
+          .eq('active', true)
+          .order('customer_name');
+    } else {
+      // If site scoped → derive customers from customer_sites
+      if (siteIds.isNotEmpty) {
+        final cs = await supabase
+            .from('customer_sites')
+            .select('customer_id')
+            .inFilter('site_id', siteIds.toList());
+        customerIds.addAll(
+          cs.map((r) => r['customer_id'] as int),
+        );
+      }
+      if (customerIds.isEmpty) {
+        rows = [];
+      } else {
+        rows = await supabase
             .from('customers')
             .select('customer_id, customer_name')
             .inFilter('customer_id', customerIds.toList())
             .eq('active', true)
             .order('customer_name');
+      }
+    }
 
     customers = rows
         .map((c) => CustomerOption(
@@ -245,6 +270,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
       await bookingController.selectCustomer(singleCustomerId);
       await _loadSitesForCustomer(singleCustomerId);
     }
+    if (mounted) setState(() {});
   }
 
 
@@ -468,7 +494,9 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
   Widget _timeDropdown() {
-    final times = bookingController.availableStartTimes;
+    final times = bookingController.availableStartTimes
+    .where((t) => bookingController.isSlotVisible(t))
+    .toList();
 
     return DropdownButtonFormField2<DateTime>(
       isExpanded: true,
@@ -857,7 +885,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
           TextButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
-              Navigator.of(context).pop();
+              Navigator.of(context).pushNamedAndRemoveUntil(
+                '/inbound-overview',
+                (route) => false,
+              );
             },
             child: const Text('Yes'),
           ),
@@ -1002,7 +1033,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 Navigator.of(context).pushNamedAndRemoveUntil(
                   '/inbound-overview',
                   (route) => false,
-                  arguments: {'booking_confirmed': true},
+                  arguments: {
+                    'booking_confirmed': true,
+                    'was_edit': editingBookingId != null,
+                  },
                 );
 
               } catch (e) {
