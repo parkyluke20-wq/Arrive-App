@@ -20,6 +20,9 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   final ScrollController _horizontalController = ScrollController();
   bool _loading = true;
   List<Map<String, dynamic>> _bookings = [];
+  List<Map<String, dynamic>> _allBookings = [];
+  final TextEditingController _referenceSearchController = TextEditingController();
+  String _referenceSearch = '';
   List<String> _statusFilter = ['all'];
   List<String> _customerFilter = ['all'];
   List<String> _customerOptions = ['all'];
@@ -54,6 +57,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   @override
   void dispose() {
     _horizontalController.dispose();
+    _referenceSearchController.dispose();
     super.dispose();
   }
 
@@ -110,7 +114,8 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       ..sort();
 
     setState(() {
-      _bookings = bookings;
+      _allBookings = bookings;
+      _applyReferenceSearch();
       if (customersInBookings.length == 1) {
         // Only one customer available → hard lock to it
         _customerOptions = customersInBookings;
@@ -238,6 +243,18 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
       return _sortAscending ? result : -result;
     });
+  }
+
+  void _applyReferenceSearch() {
+    if (_referenceSearch.isEmpty) {
+      _bookings = List<Map<String, dynamic>>.from(_allBookings);
+    } else {
+      _bookings = _allBookings.where((b) {
+        final ref = (b['reference'] ?? '').toString().toLowerCase();
+        return ref.contains(_referenceSearch.toLowerCase());
+      }).toList();
+    }
+    _applySorting();
   }
 
   Future<void> _pickFromDate() async {
@@ -800,11 +817,34 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
               icon: const Icon(Icons.download),
               label: const Text('Export CSV'),
             ),
-          ],
-        ),
-      ],
-    );
-  }
+
+            const SizedBox(width: 400),
+
+            // ───────── SEARCH ─────────
+            SizedBox(
+              width: 260,
+              child: TextField(
+                controller: _referenceSearchController,
+                decoration: const InputDecoration(
+                  hintText: 'Search reference...',
+                  prefixIcon: Icon(Icons.search),
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    _referenceSearch = value;
+                    _applyReferenceSearch();
+                  });
+                },
+              ),
+            ),
+
+                      ],
+                    ),
+                  ],
+                );
+              }
 
   Widget _buildBookingsTable() {
     final dateFmt = DateFormat('dd/MM/yyyy');
