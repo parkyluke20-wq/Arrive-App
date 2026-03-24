@@ -492,12 +492,13 @@ class _ProfilePageState extends State<ProfilePage> {
             alignment: Alignment.topLeft,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
-              child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Your Details',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              child: SingleChildScrollView(
+                child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Your Details',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
                 _detailRow('Email', currentUserEmail),
@@ -629,25 +630,17 @@ class _ProfilePageState extends State<ProfilePage> {
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: Scrollbar(
-                      controller: _scrollController,
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        controller: _scrollController,
-                        child: Column(
-                          children: members.map(_memberRow).toList(),
-                        ),
-                      ),
-                    ),
-                  ),
+               Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Column(
+                  children: members.map(_memberRow).toList(),
                 ),
+              ),
               ],
             ),
           ),
         ),
+      ),
       ),
     );
   }

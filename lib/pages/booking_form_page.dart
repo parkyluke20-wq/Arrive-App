@@ -339,75 +339,83 @@ class _BookingFormPageState extends State<BookingFormPage> {
               constraints: const BoxConstraints(maxWidth: 900),
               child: loading
                   ? const Center(child: CircularProgressIndicator())
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _sectionTitle('Booking Slot'),
-                        const SizedBox(height: 16),
+                  : SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _sectionTitle('Booking Slot'),
+                          const SizedBox(height: 16),
 
-                        _customerDropdown(),
-                        const SizedBox(height: 16),
+                          _customerDropdown(),
+                          const SizedBox(height: 16),
 
-                        Row(
-                          children: [
-                            Expanded(child: _siteDropdown()),
-                            const SizedBox(width: 24),
-                            Expanded(child: _dateField()),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(child: _siteDropdown()),
+                              const SizedBox(width: 24),
+                              Expanded(child: _dateField()),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
 
-                        Row(
-                          children: [
-                            Expanded(child: _vehicleDropdown()),
-                            const SizedBox(width: 24),
-                            Expanded(child: _timeDropdown()),
-                          ],
-                        ),
+                          Row(
+                            children: [
+                              Expanded(child: _vehicleDropdown()),
+                              const SizedBox(width: 24),
+                              Expanded(child: _timeDropdown()),
+                            ],
+                          ),
 
-                        const SizedBox(height: 32),
-                        _sectionTitle('Booking Details'),
-                        const SizedBox(height: 20),
+                          const SizedBox(height: 32),
+                          _sectionTitle('Booking Details'),
+                          const SizedBox(height: 20),
 
-                        Row(
-                          children: [
-                            Expanded(child: _deliveryReferenceField()),
-                            const SizedBox(width: 24),
-                            Expanded(child: _carrierField()),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(child: _deliveryReferenceField()),
+                              const SizedBox(width: 24),
+                              Expanded(child: _carrierField()),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
 
-                        Row(
-                          children: [
-                            Expanded(child: _qtyPallets()),
-                            const SizedBox(width: 24),
-                            Expanded(child: _vehicleReg()),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(child: _qtyPallets()),
+                              const SizedBox(width: 24),
+                              Expanded(child: _vehicleReg()),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
 
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: _container()),
-                            const SizedBox(width: 24),
-                            Expanded(child: _packingListMainButton()),
-                          ],
-                        ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(child: _container()),
+                              const SizedBox(width: 24),
+                              Expanded(child: _packingListMainButton()),
+                            ],
+                          ),
 
-                        const SizedBox(height: 12),
+                          const SizedBox(height: 12),
 
-                        Row(
-                          children: [
-                            const Spacer(),
-                            Expanded(child: _packingListSecondaryActions()),
-                          ],
-                        ),
+                          Row(
+                            children: [
+                              const Spacer(),
+                              Expanded(
+                                child: _packingListSecondaryActions(),
+                              ),
+                            ],
+                          ),
 
-                        const SizedBox(height: 32),
-                        _actionButtons(),
-                      ],
+                          const SizedBox(height: 32),
+
+                          _actionButtons(),
+
+                          // 👇 prevents edge overflow on tight screens
+                          const SizedBox(height: 24),
+                        ],
+                      ),
                     ),
             ),
           ),

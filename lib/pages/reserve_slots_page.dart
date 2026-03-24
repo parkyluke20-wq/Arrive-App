@@ -298,7 +298,8 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
                 alignment: Alignment.topLeft,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 900),
-                  child: Column(
+                  child: SingleChildScrollView(
+                    child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
@@ -356,6 +357,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
                       ),
                     ],
                   ),
+                ),
                 ),
               ),
       ),
@@ -465,7 +467,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
     }
 
     return SizedBox(
-      height: 220,
+      height: 180,
       child: ListView.builder(
         itemCount: availableSlots.length,
         itemBuilder: (_, index) {

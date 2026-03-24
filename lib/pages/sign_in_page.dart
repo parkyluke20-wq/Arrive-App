@@ -15,8 +15,6 @@ class SignInPage extends StatefulWidget {
 class _SignInPageState extends State<SignInPage> {
   // ---- Layout tuning ----
   static const double leftPadding = 350;
-  static const double topPadding = 180;
-  static const double fieldWidth = 500;
   static const double verticalSpacing = 24;
   // -----------------------
 
@@ -234,132 +232,147 @@ class _SignInPageState extends State<SignInPage> {
               child: Center(
                 child: Image.asset(
                   'assets/images/login_background.png',
-                  fit: BoxFit.contain,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.centerRight,
                 ),
               ),
             ),
           ),
-          Positioned(
-            left: leftPadding,
-            top: topPadding,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 130),
-                  child: Text(
-                    'Expect Distribution\nInbound Booking Diary',
-                    style: BrandText.title,
-                  ),
-                ),
-                const SizedBox(height: 40),
-                Text(
-                  _forcePasswordReset ? 'Reset Password:' : 'Login:',
-                  style: BrandText.subtitle,
-                ),
-                const SizedBox(height: verticalSpacing),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(350, 0, 40, 0),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 500),
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 40),
+                          child: Text(
+                            'Expect Distribution\nInbound Booking Diary',
+                            style: BrandText.title,
+                          ),
+                        ),
 
-                SizedBox(
-                  width: fieldWidth,
-                  child: TextField(
-                    controller: _emailController,
-                    enabled: !_forcePasswordReset,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      border: OutlineInputBorder(),
+                        const SizedBox(height: 40),
+
+                        Text(
+                          _forcePasswordReset ? 'Reset Password:' : 'Login:',
+                          style: BrandText.subtitle,
+                        ),
+
+                        const SizedBox(height: verticalSpacing),
+
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextField(
+                            controller: _emailController,
+                            enabled: !_forcePasswordReset,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: verticalSpacing),
+
+                        if (!_forcePasswordReset) ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextField(
+                              controller: _passwordController,
+                              obscureText: true,
+                              onSubmitted: (_) => _handleLogin(),
+                              decoration: const InputDecoration(
+                                labelText: 'Password',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          GestureDetector(
+                            onTap: _canSendReset ? _sendPasswordReset : null,
+                            child: Text(
+                              'Forgot password?',
+                              style: TextStyle(
+                                color: _canSendReset
+                                    ? BrandColors.lightBlue
+                                    : Colors.grey,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextField(
+                              controller: _newPasswordController,
+                              obscureText: true,
+                              decoration: const InputDecoration(
+                                labelText: 'New Password',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: verticalSpacing),
+
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextField(
+                              controller: _confirmPasswordController,
+                              obscureText: true,
+                              onSubmitted: (_) => _handlePasswordReset(),
+                              decoration: const InputDecoration(
+                                labelText: 'Confirm Password',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: verticalSpacing),
+
+                        if (_errorMessage != null)
+                          Text(_errorMessage!,
+                              style: const TextStyle(color: Colors.red)),
+
+                        if (_infoMessage != null)
+                          Text(_infoMessage!,
+                              style: const TextStyle(color: Colors.green)),
+
+                        const SizedBox(height: verticalSpacing),
+
+                        SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: BrandColors.lightBlue,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: _isLoading
+                                ? null
+                                : (_forcePasswordReset
+                                    ? _handlePasswordReset
+                                    : _handleLogin),
+                            child: _isLoading
+                                ? const CircularProgressIndicator()
+                                : Text(_forcePasswordReset
+                                    ? 'Reset Password'
+                                    : 'Login'),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: verticalSpacing),
-
-                if (!_forcePasswordReset) ...[
-                  SizedBox(
-                    width: fieldWidth,
-                    child: TextField(
-                      controller: _passwordController,
-                      obscureText: true,
-                      onSubmitted: (_) => _handleLogin(),
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: _canSendReset ? _sendPasswordReset : null,
-                    child: Text(
-                      'Forgot password?',
-                      style: TextStyle(
-                        color: _canSendReset
-                            ? BrandColors.lightBlue
-                            : Colors.grey,
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ),
-                ] else ...[
-                  SizedBox(
-                    width: fieldWidth,
-                    child: TextField(
-                      controller: _newPasswordController,
-                      obscureText: true,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'New Password',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: verticalSpacing),
-                  SizedBox(
-                    width: fieldWidth,
-                    child: TextField(
-                      controller: _confirmPasswordController,
-                      obscureText: true,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _handlePasswordReset(),
-                      decoration: const InputDecoration(
-                        labelText: 'Confirm Password',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: verticalSpacing),
-
-                if (_errorMessage != null)
-                  Text(_errorMessage!,
-                      style: const TextStyle(color: Colors.red)),
-
-                if (_infoMessage != null)
-                  Text(_infoMessage!,
-                      style: const TextStyle(color: Colors.green)),
-
-                const SizedBox(height: verticalSpacing),
-
-                SizedBox(
-                  width: fieldWidth,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: BrandColors.lightBlue,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _isLoading
-                        ? null
-                        : (_forcePasswordReset
-                            ? _handlePasswordReset
-                            : _handleLogin),
-                    child: _isLoading
-                        ? const CircularProgressIndicator()
-                        : Text(_forcePasswordReset
-                            ? 'Reset Password'
-                            : 'Login'),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ],

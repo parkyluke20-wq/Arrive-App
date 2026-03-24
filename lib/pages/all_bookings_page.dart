@@ -71,7 +71,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     var query = supabase
       .from('bookings')
       .select(
-        'booking_id,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name)',
+        'booking_id,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name),qty_cases,qty_pallets',
       );
 
   if (!_statusFilter.contains('all')) {
@@ -146,6 +146,8 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       'Time',
       'Reference',
       'Status',
+      'Pallets',
+      'Cases'
     ]);
 
     final dateFmt = DateFormat('dd/MM/yyyy');
@@ -162,6 +164,8 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
         dateFmt.format(startTime),
         timeFmt.format(startTime),
         booking['reference'] ?? '',
+        booking['qty_pallets'] ?? '',
+        booking['qty_cases'] ?? '',
         _formatStatus(booking['status']),
       ]); 
     }
@@ -186,7 +190,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       } else if (_sortAscending) {
         _sortAscending = false;
       } else {
-        _sortColumn = null; // third click → remove sort
+        _sortColumn = null; 
       }
 
       _applySorting();
@@ -228,6 +232,14 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
         case 'status':
           aVal = a['status'] ?? '';
           bVal = b['status'] ?? '';
+          break;
+        case 'pallets':
+          aVal = a['qty_pallets'] ?? '';
+          bVal = b['qty_pallets'] ?? '';
+          break;
+        case 'cases':
+          aVal = a['qty_cases'] ?? '';
+          bVal = b['qty_cases'] ?? '';
           break;
         default:
           return 0;
@@ -605,7 +617,10 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
         ),
         const SizedBox(height: 16),
 
-        Row(
+        Wrap(
+          spacing: 1,
+          runSpacing: 1,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
 
             // ───────── STATUS FILTER ─────────
@@ -793,7 +808,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
               ),
             ),
 
-            const SizedBox(width: 24),
+            const SizedBox(width: 16),
 
             // ───────── DATE TO ─────────
             OutlinedButton(
@@ -805,7 +820,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
               ),
             ),
 
-            const SizedBox(width: 24),
+            const SizedBox(width: 16),
 
             // ───────── EXPORT ─────────
             ElevatedButton.icon(
@@ -818,7 +833,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
               label: const Text('Export CSV'),
             ),
 
-            const SizedBox(width: 400),
+            const SizedBox(width: 16),
 
             // ───────── SEARCH ─────────
             SizedBox(
@@ -850,24 +865,28 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     final dateFmt = DateFormat('dd/MM/yyyy');
     final timeFmt = DateFormat('HH:mm');
 
-    const double siteW = 150;
-    const double customerW = 200;
-    const double typeW = 300;
-    const double dateW = 200;
-    const double timeW = 100;
+    const double actionW = 180;
     const double refW = 200;
-    const double statusW = 200;
-    const double actionW = 400;
+    const double statusW = 110;
+    const double siteW = 120;
+    const double customerW = 150;
+    const double typeW = 220;
+    const double dateW = 120;
+    const double timeW = 90;
+    const double palletsW = 90.0;
+    const double casesW = 90.0;
 
     const double tableWidth =
+    actionW +
+    refW +
+    statusW +
     siteW +
     customerW +
     typeW +
     dateW +
     timeW +
-    refW +
-    statusW +
-    actionW;
+    palletsW +
+    casesW;
 
     Widget headerCell(String text, double width, String columnKey) {
       final isActive = _sortColumn == columnKey;
@@ -934,17 +953,19 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                 color: BrandColors.lightBlue,
                 padding: const EdgeInsets.symmetric(
                   vertical: 10,
-                ), // removed horizontal padding (was causing +24px overflow)
+                ), 
                 child: Row(
                   children: [
+                    headerCell('Action', actionW, 'action'),
+                    headerCell('Reference', refW, 'reference'),
+                    headerCell('Status', statusW, 'status'),
                     headerCell('Site', siteW, 'site'),
                     headerCell('Customer', customerW, 'customer'),
                     headerCell('Type', typeW, 'type'),
                     headerCell('Date', dateW, 'date'),
                     headerCell('Time', timeW, 'time'),
-                    headerCell('Reference', refW, 'reference'),
-                    headerCell('Status', statusW, 'status'),
-                    headerCell('Action', actionW, 'action'),
+                    headerCell('Pallets', palletsW, 'pallets'),
+                    headerCell('Cases', casesW, 'cases'),
                   ],
                 ),
               ),
@@ -971,6 +992,96 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                         ),
                         child: Row(
                           children: [
+                            SizedBox(
+                              width: actionW,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+
+                                  // UPDATE STATUS
+                                  if (_canUpdateStatus &&
+                                      booking['status'] != 'received' &&
+                                      booking['status'] != 'cancelled' &&
+                                      booking['status'] != 'draft')
+                                    Tooltip(
+                                      message: 'Update Status',
+                                      child: IconButton(
+                                        icon: const Icon(Icons.update),
+                                        color: BrandColors.orange,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 28,
+                                          minHeight: 28,
+                                        ),
+                                        onPressed: () => _openUpdateStatusDialog(booking),
+                                      ),
+                                    ),
+
+                                  // EDIT
+                                  if (booking['status'] != 'received' &&
+                                      booking['status'] != 'cancelled')
+                                    Tooltip(
+                                      message: 'Edit',
+                                      child: IconButton(
+                                        icon: const Icon(Icons.edit),
+                                        color: BrandColors.orange,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 28,
+                                          minHeight: 28,
+                                        ),
+                                        onPressed: () =>
+                                            _openEditBooking(booking['booking_id']),
+                                      ),
+                                    ),
+
+                                  // CANCEL
+                                  if (booking['status'] != 'received' &&
+                                      booking['status'] != 'cancelled')
+                                    Tooltip(
+                                      message: 'Cancel',
+                                      child: IconButton(
+                                        icon: const Icon(Icons.cancel),
+                                        color: BrandColors.red,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 28,
+                                          minHeight: 28,
+                                        ),
+                                        onPressed: () => _confirmCancel(index),
+                                      ),
+                                    ),
+
+                                  // DOWNLOAD
+                                  if (booking['status'] != 'cancelled' &&
+                                      booking['packing_list_path'] != null &&
+                                      booking['packing_list_path']
+                                          .toString()
+                                          .isNotEmpty)
+                                    Tooltip(
+                                      message: 'Download Packing List',
+                                      child: IconButton(
+                                        icon: const Icon(Icons.download),
+                                        color: BrandColors.green,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 28,
+                                          minHeight: 28,
+                                        ),
+                                        onPressed: () => _downloadPackingList(
+                                          booking['packing_list_path'],
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            dataCell(
+                                booking['reference'] ?? '',
+                                refW),
+                            dataCell(
+                                _formatStatus(booking['status']),
+                                statusW),
                             dataCell(
                                 booking['sites']?['site_name'] ?? '—',
                                 siteW),
@@ -987,113 +1098,12 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                 timeFmt.format(startTime),
                                 timeW),
                             dataCell(
-                                booking['reference'] ?? '',
-                                refW),
+                              (booking['qty_pallets'] ?? '—').toString(),
+                              palletsW,
+                            ),
                             dataCell(
-                                _formatStatus(booking['status']),
-                                statusW),
-                            SizedBox(
-                              width: actionW,
-                              child: Wrap(
-                                spacing: 6,
-                                runSpacing: 4,
-                                children: [
-                                  // Update Status
-                                  if (_canUpdateStatus &&
-                                      booking['status'] != 'received' &&
-                                      booking['status'] != 'cancelled' &&
-                                      booking['status'] != 'draft')
-                                    ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: BrandColors.orange,
-                                        foregroundColor: BrandColors.charcoal,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 14,
-                                          vertical: 6,
-                                        ),
-                                        textStyle: const TextStyle(fontSize: 12),
-                                        minimumSize: const Size(0, 30),
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                        elevation: 0,
-                                      ),
-                                      onPressed: () => _openUpdateStatusDialog(booking),
-                                      child: const Text('Update Status'),
-                                    ),
-
-                                  // EDIT
-                                  if (booking['status'] != 'received' &&
-                                      booking['status'] != 'cancelled')
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: BrandColors.orange,
-                                      foregroundColor: BrandColors.charcoal,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 6,
-                                      ),
-                                      textStyle: const TextStyle(fontSize: 12),
-                                      minimumSize: const Size(0, 30),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                      elevation: 0,
-                                    ),
-                                    onPressed: () =>
-                                        _openEditBooking(booking['booking_id']),
-                                    child: const Text('Edit'),
-                                  ),
-
-                                  // CANCEL
-                                  if (booking['status'] != 'received' &&
-                                      booking['status'] != 'cancelled')
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: BrandColors.red,
-                                      foregroundColor: BrandColors.charcoal,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 6,
-                                      ),
-                                      textStyle: const TextStyle(fontSize: 12),
-                                      minimumSize: const Size(0, 30),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                      elevation: 0,
-                                    ),
-                                    onPressed: () =>
-                                        _confirmCancel(index),
-                                    child: const Text('Cancel'),
-                                  ),
-
-                                  // DOWNLOAD
-                                  if (booking['status'] != 'cancelled' &&
-                                      booking['packing_list_path'] != null &&
-                                      booking['packing_list_path']
-                                          .toString()
-                                          .isNotEmpty)
-                                    ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: BrandColors.green,
-                                        foregroundColor: BrandColors.charcoal,
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 14,
-                                          vertical: 6,
-                                        ),
-                                        textStyle:
-                                            const TextStyle(fontSize: 12),
-                                        minimumSize:
-                                            const Size(0, 30),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                        elevation: 0,
-                                      ),
-                                      onPressed: () =>
-                                          _downloadPackingList(
-                                            booking['packing_list_path'],
-                                          ),
-                                      child: const Text('Download'),
-                                    ),
-                                ],
-                              ),
+                              (booking['qty_cases'] ?? '—').toString(),
+                              casesW,
                             ),
                           ],
                         ),
