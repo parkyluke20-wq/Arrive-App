@@ -36,8 +36,8 @@ class BookingAvailabilityService {
     required DateTime from,
     required DateTime to,
   }) async {
-    final fromIso = from.toUtc().toIso8601String();
-    final toIso = to.toUtc().toIso8601String();
+    final fromIso = from.toIso8601String();
+    final toIso = to.toIso8601String();
 
     final response = await supabase
       .from('slot_availability_projection')
@@ -68,7 +68,7 @@ class BookingAvailabilityService {
     required int requiredSlots,
   }) {
     final DateTime minAllowed =
-        DateTime.now().toUtc().add(const Duration(hours: 24));
+        DateTime.now().add(const Duration(hours: 24));
 
     final Set<DateTime> bookableDates = {};
     final Map<DateTime, Map<String, List<DateTime>>> byDay = {};
@@ -82,10 +82,10 @@ class BookingAvailabilityService {
       if (!allowedPools.contains(poolId)) continue;
 
       final DateTime start =
-          DateTime.parse(r['slot_start']).toUtc();
+          DateTime.parse(r['slot_start']);
 
       final DateTime day =
-          DateTime.utc(start.year, start.month, start.day);
+          DateTime(start.year, start.month, start.day);
 
       byDay
           .putIfAbsent(day, () => {})
@@ -160,7 +160,7 @@ class BookingAvailabilityService {
       if (!allowedPools.contains(poolId)) continue;
 
       final DateTime start =
-          DateTime.parse(r['slot_start']).toUtc();
+          DateTime.parse(r['slot_start']);
 
       byPool.putIfAbsent(poolId, () => []);
       byPool[poolId]!.add(start);

@@ -160,7 +160,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
       );
 
       final DateTime storedStart =
-          DateTime.parse(row['start_time']).toUtc();
+          DateTime.parse(row['start_time']);
 
       final DateTime restoredDate = DateTime(
         storedStart.year,

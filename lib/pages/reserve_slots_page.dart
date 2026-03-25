@@ -109,12 +109,12 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
         .select('slot_start')
         .eq('pool_id', selectedPool!)
         .eq('slot_status', 'available')
-        .gte('slot_start', start.toUtc().toIso8601String())
-        .lt('slot_start', end.toUtc().toIso8601String())
+        .gte('slot_start', start.toIso8601String())
+        .lt('slot_start', end.toIso8601String())
         .order('slot_start');
 
     availableSlots = rows
-        .map<DateTime>((r) => DateTime.parse(r['slot_start']).toUtc())
+        .map<DateTime>((r) => DateTime.parse(r['slot_start']))
         .toList()
       ..sort();
 
@@ -190,10 +190,9 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
         await supabase.from('outbound_reservations').insert({
           'site_id': selectedSite,
           'pool_id': selectedPool,
-          'start_time': group.first.toUtc().toIso8601String(),
+          'start_time': group.first.toIso8601String(),
           'end_time': group.last
               .add(const Duration(minutes: 30))
-              .toUtc()
               .toIso8601String(),
           'reason': reasonController.text.trim(),
           'reserved_by': userId,

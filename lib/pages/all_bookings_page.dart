@@ -84,7 +84,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   }
 
   if (_fromDate != null) {
-    query = query.gte('start_time', _fromDate!.toUtc().toIso8601String());
+    query = query.gte('start_time', _fromDate!.toIso8601String());
   }
 
   if (_toDate != null) {
@@ -96,7 +96,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       59,
       59,
     );
-    query = query.lte('start_time', endOfDay.toUtc().toIso8601String());
+    query = query.lte('start_time', endOfDay.toIso8601String());
   }
 
   final response = await query.order('start_time', ascending: false);
@@ -155,7 +155,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
     for (final booking in _bookings) {
       final startTime =
-          DateTime.parse(booking['start_time']).toUtc();
+          DateTime.parse(booking['start_time']);
 
       rows.add([
         booking['sites']?['site_name'] ?? '',
@@ -517,7 +517,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                     startTime.day,
                     pickedTime.hour,
                     pickedTime.minute,
-                  ).toUtc();
+                  );
                 }
 
                 await supabase
@@ -569,7 +569,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                   .from('bookings')
                   .update({
                     'status': 'cancelled',
-                    'updated_at': DateTime.now().toUtc().toIso8601String(),
+                    'updated_at': DateTime.now().toIso8601String(),
                   })
                   .eq('booking_id', bookingId);
 
@@ -977,7 +977,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                     children: List.generate(_bookings.length, (index) {
                       final booking = _bookings[index];
                       final startTime =
-                          DateTime.parse(booking['start_time']).toUtc();
+                          DateTime.parse(booking['start_time']);
 
                       return Container(
                         padding: const EdgeInsets.symmetric(

@@ -36,8 +36,8 @@ class BookingService {
       'vehicle_type_id': vehicleTypeId,
 
       // ---- timing ----
-      'start_time': start.toUtc().toIso8601String(),
-      'end_time': end.toUtc().toIso8601String(),
+      'start_time': start.toIso8601String(),
+      'end_time': end.toIso8601String(),
       'booking_date': DateTime(
         start.year,
         start.month,
@@ -57,7 +57,7 @@ class BookingService {
 
       // ---- status ----
       'status': status,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      'updated_at': DateTime.now().toIso8601String(),
     };
   }
 
@@ -140,8 +140,8 @@ class BookingService {
     // ----------------------------------------------------
     // 🔒 24 HOUR BUSINESS RULE ENFORCEMENT
     // ----------------------------------------------------
-    final nowUtc = DateTime.now().toUtc();
-    final minimumAllowed = nowUtc.add(const Duration(hours: 24));
+    final now = DateTime.now();
+    final minimumAllowed = now.add(const Duration(hours: 24));
 
     if (start.isBefore(minimumAllowed)) {
       throw Exception(

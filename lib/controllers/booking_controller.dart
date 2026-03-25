@@ -104,10 +104,10 @@ class BookingController extends ChangeNotifier {
       return;
     }
 
-    final nowUtc = DateTime.now().toUtc();
+    final nowLocal = DateTime.now();
 
     final startOfToday =
-        DateTime.utc(nowUtc.year, nowUtc.month, nowUtc.day);
+      DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
 
     final from = startOfToday.subtract(const Duration(days: 1));
     final to = startOfToday.add(const Duration(days: 60));
@@ -119,8 +119,8 @@ class BookingController extends ChangeNotifier {
 
     _slotVisibilityByPool.clear();
     for (final r in rows) {
-      final startUtc = DateTime.parse(r['slot_start']).toUtc();
-      final key = startUtc.millisecondsSinceEpoch;
+      final start = DateTime.parse(r['slot_start']);
+      final key = start.millisecondsSinceEpoch;
       final poolId = r['pool_id'] as String;
       final visible = r['visible'] == true;
 
@@ -176,7 +176,7 @@ class BookingController extends ChangeNotifier {
 
     _currentEligiblePools = pools;
 
-    final from = DateTime.utc(
+    final from = DateTime(
       selectedDate!.year,
       selectedDate!.month,
       selectedDate!.day,
@@ -193,8 +193,8 @@ class BookingController extends ChangeNotifier {
     _slotVisibilityByPool.clear();
 
     for (final r in rows) {
-      final startUtc = DateTime.parse(r['slot_start']).toUtc();
-      final key = startUtc.millisecondsSinceEpoch;
+      final start = DateTime.parse(r['slot_start']);
+      final key = start.millisecondsSinceEpoch;
       final poolId = r['pool_id'] as String;
       final visible = r['visible'] == true;
 
@@ -248,7 +248,7 @@ class BookingController extends ChangeNotifier {
       );
 
       final DateTime storedStart =
-          DateTime.parse(row['start_time']).toUtc();
+        DateTime.parse(row['start_time']);
 
       selectedDate = DateTime(
         storedStart.year,

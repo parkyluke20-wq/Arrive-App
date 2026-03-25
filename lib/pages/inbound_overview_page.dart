@@ -97,9 +97,7 @@ class _InboundOverviewPageState
                   .from('bookings')
                   .update({
                     'status': 'cancelled',
-                    'updated_at': DateTime.now()
-                        .toUtc()
-                        .toIso8601String(),
+                    'updated_at': DateTime.now().toIso8601String(),
                   })
                   .eq('booking_id', bookingId);
 
@@ -117,7 +115,7 @@ class _InboundOverviewPageState
 
     setState(() => _loading = true);
 
-    final now = DateTime.now().toUtc();
+    final now = DateTime.now();
 
     final response = await supabase
         .from('bookings')
@@ -374,8 +372,7 @@ class _InboundOverviewPageState
                         final startTime =
                             DateTime.parse(
                                     booking[
-                                        'start_time'])
-                                .toUtc();
+                                        'start_time']);
 
                         return Container(
                           padding:
