@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../layouts/app_scaffold.dart';
 import '../theme/brand_colors.dart';
 import 'dart:html' as html;
+import '../pages/booking_form_page.dart';
 
 class InboundOverviewPage extends StatefulWidget {
   const InboundOverviewPage({super.key});
@@ -399,11 +400,11 @@ class _InboundOverviewPageState
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    // EDIT
+                                    // VIEW
                                     Tooltip(
-                                      message: 'Edit',
+                                      message: 'View',
                                       child: IconButton(
-                                        icon: const Icon(Icons.edit),
+                                        icon: const Icon(Icons.visibility),
                                         color: BrandColors.orange,
                                         padding: EdgeInsets.zero,
                                         constraints: const BoxConstraints(
@@ -415,6 +416,7 @@ class _InboundOverviewPageState
                                           '/booking-form',
                                           arguments: {
                                             'booking_id': booking['booking_id'],
+                                            'mode': BookingFormMode.view,
                                           },
                                         ),
                                       ),

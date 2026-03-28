@@ -7,6 +7,7 @@ import '../layouts/app_scaffold.dart';
 import '../theme/brand_colors.dart';
 import 'package:csv/csv.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
+import '../pages/booking_form_page.dart';
 
 class AllBookingsPage extends StatefulWidget {
   const AllBookingsPage({super.key});
@@ -356,6 +357,21 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
         ),
       );
     }
+
+    await _loadBookings();
+  }
+
+  Future<void> _openViewBooking(String bookingId) async {
+    await Navigator.pushNamed(
+      context,
+      '/booking-form',
+      arguments: {
+        'booking_id': bookingId,
+        'mode': BookingFormMode.view,
+      },
+    );
+
+    if (!mounted) return;
 
     await _loadBookings();
   }
@@ -1017,13 +1033,11 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                       ),
                                     ),
 
-                                  // EDIT
-                                  if (booking['status'] != 'received' &&
-                                      booking['status'] != 'cancelled')
-                                    Tooltip(
-                                      message: 'Edit',
-                                      child: IconButton(
-                                        icon: const Icon(Icons.edit),
+                                  // VIEW
+                                  Tooltip(
+                                    message: 'View',
+                                    child: IconButton(
+                                      icon: const Icon(Icons.visibility),
                                         color: BrandColors.orange,
                                         padding: EdgeInsets.zero,
                                         constraints: const BoxConstraints(
@@ -1031,7 +1045,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                           minHeight: 28,
                                         ),
                                         onPressed: () =>
-                                            _openEditBooking(booking['booking_id']),
+                                            _openViewBooking(booking['booking_id']),
                                       ),
                                     ),
 

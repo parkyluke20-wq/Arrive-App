@@ -237,7 +237,8 @@ class BookingService {
             .update({
               'packing_list_path': null,
             })
-            .eq('booking_id', resolvedBookingId);
+            .eq('booking_id', resolvedBookingId)
+            .select();
       }
 
     } catch (e) {
@@ -246,7 +247,8 @@ class BookingService {
         await supabase
             .from('bookings')
             .delete()
-            .eq('booking_id', resolvedBookingId);
+            .eq('booking_id', resolvedBookingId)
+            .select();
       }
 
       rethrow;

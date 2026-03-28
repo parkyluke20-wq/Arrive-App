@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import '../layouts/app_scaffold.dart';
 import '../theme/brand_colors.dart';
 import '../controllers/booking_controller.dart';
@@ -37,15 +38,25 @@ class VehicleTypeOption {
 }
 
 // ---------------- PAGE ----------------
+enum BookingFormMode { create, edit, view }
 
 class BookingFormPage extends StatefulWidget {
-  const BookingFormPage({super.key});
+  final BookingFormMode mode;
+
+  const BookingFormPage({
+    super.key,
+    this.mode = BookingFormMode.create,
+  });
 
   @override
   State<BookingFormPage> createState() => _BookingFormPageState();
 }
 
 class _BookingFormPageState extends State<BookingFormPage> {
+  late BookingFormMode mode;
+  bool get isView => mode == BookingFormMode.view;
+  bool get isEdit => mode == BookingFormMode.edit;
+  bool get isCreate => mode == BookingFormMode.create;
   final SupabaseClient supabase = Supabase.instance.client;
 
   late final BookingController bookingController;
@@ -65,6 +76,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
   String? editingBookingId;
   bool _didLoadRouteArgs = false;
   bool loading = true;
+  Future<List<Map<String, dynamic>>>? _eventsFuture;
+  String? bookingStatus;
 
   // ---- reference data ----
   List<CustomerOption> customers = [];
@@ -73,9 +86,11 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   // ---------------- INIT ----------------
 
+
   @override
   void initState() {
     super.initState();
+    mode = widget.mode;
     referenceController.addListener(_refreshConfirmState);
     carrierController.addListener(_refreshConfirmState);
     qtyPalletsController.addListener(_refreshConfirmState);
@@ -91,9 +106,17 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+        if (args != null && args['mode'] != null) {
+          mode = args['mode'];
+        }
 
     if (args != null && args['booking_id'] != null) {
       editingBookingId = args['booking_id'];
+
+      // Only set edit if not explicitly view
+      if (mode != BookingFormMode.view) {
+        mode = BookingFormMode.edit;
+      }
     }
 
     _init();
@@ -140,6 +163,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
             'container_number, qty_pallets, qty_cases, booking_date, '
             'status, packing_list_path'
           )
+          
           .eq('booking_id', editingBookingId!)
           .single();
 
@@ -147,6 +171,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
       existingPackingListPath = row['packing_list_path'];
       packingListRemoved = false;
       packingListFile = null;
+      bookingStatus = row['status'];
 
       // ---- restore site list first ----
       await _loadSitesForCustomer(row['customer_id']);
@@ -194,6 +219,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
           '${restoredDate.day}/${restoredDate.month}/${restoredDate.year}';
     }
 
+    _eventsFuture = _fetchBookingEvents();
     if (!mounted) return;
     setState(() => loading = false);
   }
@@ -324,8 +350,127 @@ class _BookingFormPageState extends State<BookingFormPage> {
         .toList();
   }
 
-  // ---------------- UI ----------------
+  Widget _eventRow(Map<String, dynamic> e) {
+    final timestamp = DateTime.parse(e['event_timestamp']);
+    final isComment = e['event_type'] == 'comment_added';
 
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                e['user_name'] ?? 'System',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                _formatEventTime(timestamp),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 4),
+
+          if (isComment)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              margin: const EdgeInsets.only(bottom: 4),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                'COMMENT',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+              ),
+            ),
+
+          Text(
+            e['audit_text'] ?? '',
+            overflow: TextOverflow.visible,
+            softWrap: true,
+          ),
+          const Divider(),
+        ],
+      ),
+    );
+  }
+
+  Widget _eventsPanel() {
+    if (editingBookingId == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          const Text(
+            'Booking Activity',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // 🔑 Scroll lives here, but height comes from parent
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _eventsFuture,
+              builder: (context, snapshot) {
+
+                if (!snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
+
+                final events = snapshot.data!;
+
+                if (events.isEmpty) {
+                  return const Center(
+                    child: Text('No activity recorded'),
+                  );
+                }
+
+                return ListView.builder(
+                  itemCount: events.length,
+                  itemBuilder: (context, index) {
+                    return _eventRow(events[index]);
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------- UI ----------------
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -335,95 +480,145 @@ class _BookingFormPageState extends State<BookingFormPage> {
           title: 'Booking Form',
           body: Padding(
             padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 900),
-              child: loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _sectionTitle('Booking Slot'),
-                          const SizedBox(height: 16),
 
-                          _customerDropdown(),
-                          const SizedBox(height: 16),
+            child: loading
+                ? const Center(child: CircularProgressIndicator())
 
-                          Row(
-                            children: [
-                              Expanded(child: _siteDropdown()),
-                              const SizedBox(width: 24),
-                              Expanded(child: _dateField()),
-                            ],
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+
+                      // 🔹 LEFT: FORM
+                      Expanded(
+                        flex: 3,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 900),
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    _sectionTitle('Booking Slot'),
+
+                                    if (editingBookingId != null)
+                                      Row(
+                                        children: [
+
+                                          if (isView && bookingStatus != 'received' && bookingStatus != 'cancelled')
+                                            ElevatedButton.icon(
+                                              icon: const Icon(Icons.edit, size: 18),
+                                              label: const Text('Edit'),
+                                              onPressed: _switchToEditMode,
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: BrandColors.orange,
+                                                foregroundColor: BrandColors.darkcharcoal,
+                                              ),
+                                            ),
+
+                                          const SizedBox(width: 12),
+
+                                          OutlinedButton.icon(
+                                            icon: const Icon(Icons.comment, size: 18),
+                                            label: const Text('Comment'),
+                                            onPressed: _addComment,
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+
+                                _customerDropdown(),
+                                const SizedBox(height: 16),
+
+                                Row(
+                                  children: [
+                                    Expanded(child: _siteDropdown()),
+                                    const SizedBox(width: 24),
+                                    Expanded(child: _dateField()),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+
+                                Row(
+                                  children: [
+                                    Expanded(child: _vehicleDropdown()),
+                                    const SizedBox(width: 24),
+                                    Expanded(child: _timeDropdown()),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 32),
+                                _sectionTitle('Booking Details'),
+                                const SizedBox(height: 20),
+
+                                Row(
+                                  children: [
+                                    Expanded(child: _deliveryReferenceField()),
+                                    const SizedBox(width: 24),
+                                    Expanded(child: _carrierField()),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+
+                                Row(
+                                  children: [
+                                    Expanded(child: _qtyPallets()),
+                                    const SizedBox(width: 24),
+                                    Expanded(child: _vehicleReg()),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(child: _container()),
+                                    const SizedBox(width: 24),
+                                    Expanded(child: _packingListMainButton()),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 12),
+
+                                Row(
+                                  children: [
+                                    const Spacer(),
+                                    Expanded(
+                                      child: _packingListSecondaryActions(),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 32),
+
+                                _actionButtons(),
+
+                                const SizedBox(height: 24),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 16),
-
-                          Row(
-                            children: [
-                              Expanded(child: _vehicleDropdown()),
-                              const SizedBox(width: 24),
-                              Expanded(child: _timeDropdown()),
-                            ],
-                          ),
-
-                          const SizedBox(height: 32),
-                          _sectionTitle('Booking Details'),
-                          const SizedBox(height: 20),
-
-                          Row(
-                            children: [
-                              Expanded(child: _deliveryReferenceField()),
-                              const SizedBox(width: 24),
-                              Expanded(child: _carrierField()),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-
-                          Row(
-                            children: [
-                              Expanded(child: _qtyPallets()),
-                              const SizedBox(width: 24),
-                              Expanded(child: _vehicleReg()),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(child: _container()),
-                              const SizedBox(width: 24),
-                              Expanded(child: _packingListMainButton()),
-                            ],
-                          ),
-
-                          const SizedBox(height: 12),
-
-                          Row(
-                            children: [
-                              const Spacer(),
-                              Expanded(
-                                child: _packingListSecondaryActions(),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 32),
-
-                          _actionButtons(),
-
-                          // 👇 prevents edge overflow on tight screens
-                          const SizedBox(height: 24),
-                        ],
+                        ),
                       ),
-                    ),
-            ),
+
+                      const SizedBox(width: 24),
+
+                      Expanded(
+                        flex: 2,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 48),
+                          child: _eventsPanel(), // 🔑 remove SizedBox
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         );
       },
     );
   }
-
   // ---------------- DROPDOWNS ----------------
 
   Widget _customerDropdown() {
@@ -441,7 +636,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
           .toList(),
       dropdownStyleData: const DropdownStyleData(maxHeight: 260),
       menuItemStyleData: const MenuItemStyleData(height: 32),
-      onChanged: (v) async {
+      onChanged: isView ? null : (v) async {
         await bookingController.selectCustomer(v);
         sites.clear();
         dateController.clear();
@@ -469,7 +664,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
           .toList(),
       dropdownStyleData: const DropdownStyleData(maxHeight: 260),
       menuItemStyleData: const MenuItemStyleData(height: 32),
-      onChanged: (v) async {
+      onChanged: isView ? null : (v) async {
         await bookingController.selectSite(v);
       },
     );
@@ -490,21 +685,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
           .toList(),
       dropdownStyleData: const DropdownStyleData(maxHeight: 260),
       menuItemStyleData: const MenuItemStyleData(height: 32),
-      onChanged: (v) async {
+      onChanged: isView ? null : (v) async {
         await bookingController.selectVehicleType(v);
         bookingController.clearSelectedDateAndTime();
         dateController.clear();
         qtyPalletsController.clear();
-        await bookingController.computeBookableDates();
         setState(() {});
       },
     );
   }
 
   Widget _timeDropdown() {
+    final selected = bookingController.selectedStartTime;
     final times = bookingController.availableStartTimes
-    .where((t) => bookingController.isSlotVisible(t))
-    .toList();
+        .where((t) =>
+            bookingController.isSlotVisible(t) ||
+            (selected != null && t.isAtSameMomentAs(selected)))
+        .toList();
 
     return DropdownButtonFormField2<DateTime>(
       isExpanded: true,
@@ -521,7 +718,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
           .toList(),
       dropdownStyleData: const DropdownStyleData(maxHeight: 260),
       menuItemStyleData: const MenuItemStyleData(height: 32),
-      onChanged: bookingController.selectStartTime,
+      onChanged: isView ? null : bookingController.selectStartTime,
     );
   }
 
@@ -537,12 +734,16 @@ class _BookingFormPageState extends State<BookingFormPage> {
         bookingController.selectedVehicleType != null;
 
     return InkWell(
-      onTap: !enabled
+      onTap: (!enabled || isView)
           ? null
           : () async {
-              await bookingController.computeBookableDates();
-
+            print('DATE TAP FIRED');   // 👈 add this
+              if (!isView) {
+                await bookingController.computeBookableDates();
+              }
+              print('DATES: ${bookingController.bookableDates.length}');
               if (bookingController.bookableDates.isEmpty) {
+                debugPrint('No bookable dates returned');
                 return;
               }
 
@@ -577,43 +778,45 @@ class _BookingFormPageState extends State<BookingFormPage> {
               }
             },
       child: IgnorePointer(
-        child: TextField(
-          controller: dateController,
-          decoration: const InputDecoration(
-            labelText: 'Date *',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
+      child: TextField(
+        controller: dateController,
+        readOnly: true,
+        showCursor: false,
+        decoration: const InputDecoration(
+          labelText: 'Date *',
+          border: OutlineInputBorder(),
+          isDense: true,
         ),
+      ),
       ),
     );
   }
 
 
   Widget _deliveryReferenceField() =>
-      TextField(controller: referenceController, decoration: _desktopDropdownDecoration('Delivery Reference *'));
+      TextField(controller: referenceController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Delivery Reference *'));
 
   Widget _carrierField() =>
-      TextField(controller: carrierController, decoration: _desktopDropdownDecoration('Carrier *'));
+      TextField(controller: carrierController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Carrier *'));
 
   Widget _qtyPallets() {
     final loadType = bookingController.selectedVehicleType?.loadType;
-
     final label =
         loadType == 'container' ? 'Qty Cases *' : 'Qty Pallets *';
-
     return TextField(
       controller: qtyPalletsController,
+      readOnly: isView,
+      showCursor: !isView,
       keyboardType: TextInputType.number,
       decoration: _desktopDropdownDecoration(label),
     );
   }
 
   Widget _vehicleReg() =>
-      TextField(controller: vehicleRegController, decoration: _desktopDropdownDecoration('Vehicle Reg'));
+      TextField(controller: vehicleRegController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Vehicle Reg'));
 
   Widget _container() =>
-      TextField(controller: containerController, decoration: _desktopDropdownDecoration('Container Number'));
+      TextField(controller: containerController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Container Number'));
 
   Widget _packingListMainButton() {
     final hasExisting =
@@ -645,6 +848,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
           ),
         ),
         onPressed: () async {
+          if (isView) return;
+
           final result =
               await FilePicker.platform.pickFiles(withData: true);
 
@@ -672,32 +877,33 @@ class _BookingFormPageState extends State<BookingFormPage> {
       children: [
 
         if (hasExisting && !hasNew)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: TextButton(
-              onPressed: () async {
-                final signedUrl = await supabase.storage
-                    .from('booking-documents')
-                    .createSignedUrl(
-                      existingPackingListPath!,
-                      60,
-                    );
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: TextButton(
+            onPressed: () async {
+              final signedUrl = await supabase.storage
+                  .from('booking-documents')
+                  .createSignedUrl(
+                    existingPackingListPath!,
+                    60,
+                  );
 
-                await launchUrl(Uri.parse(signedUrl));
-              },
-              child: const Text('View Existing Packing List'),
-            ),
+              await launchUrl(Uri.parse(signedUrl));
+            },
+            child: const Text('View Existing Packing List'),
           ),
-
-        TextButton(
-          onPressed: () {
-            setState(() {
-              packingListRemoved = true;
-              packingListFile = null;
-            });
-          },
-          child: const Text('Remove Packing List'),
         ),
+
+        if (!isView)
+          TextButton(
+            onPressed: () {
+              setState(() {
+                packingListRemoved = true;
+                packingListFile = null;
+              });
+            },
+            child: const Text('Remove Packing List'),
+          ),
       ],
     );
   }
@@ -705,6 +911,98 @@ class _BookingFormPageState extends State<BookingFormPage> {
   // ---------------- ACTIONS ----------------
   void _refreshConfirmState() {
     setState(() {});
+  }
+
+  void _switchToEditMode() {
+    if (bookingStatus == 'received' || bookingStatus == 'cancelled') return;
+
+    setState(() {
+      mode = BookingFormMode.edit;
+    });
+  }
+  Future<void> _addComment() async {
+    if (editingBookingId == null) return;
+
+    final controller = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Add Comment'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              hintText: 'Enter comment...',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final text = controller.text.trim();
+                if (text.isEmpty) return;
+                Navigator.of(dialogContext).pop(text);
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result == null) return;
+
+    await _insertComment(result);
+  }
+
+  Future<void> _insertComment(String comment) async {
+    final user = supabase.auth.currentUser;
+
+    if (user == null || editingBookingId == null) return;
+
+    try {
+      await supabase.from('booking_events').insert({
+        'booking_id': editingBookingId,
+        'event_type': 'comment_added',
+        'user_id': user.id,
+        'audit_text': comment,
+      });
+
+      _refreshEventsPanel();
+
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to add comment: $e')),
+      );
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchBookingEvents() async {
+      final response = await supabase
+          .from('booking_events_view')
+          .select()
+          .eq('booking_id', editingBookingId!)
+          .order('event_timestamp', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    }
+  String _formatEventTime(DateTime dt) {
+    return DateFormat('dd/MM/yyyy HH:mm').format(dt);
+  }
+
+  void _refreshEventsPanel() {
+    setState(() {
+      _eventsFuture = _fetchBookingEvents();
+    });
   }
 
   String? _validateMandatoryFields() {
@@ -821,6 +1119,9 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
   Widget _actionButtons() {
+    if (isView) {
+      return const SizedBox.shrink();
+    }
     return SizedBox(
       width: double.infinity,
       child: Row(

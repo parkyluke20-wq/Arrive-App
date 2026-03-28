@@ -16,7 +16,7 @@ class BookingController extends ChangeNotifier {
   }) : availabilityService = BookingAvailabilityService(supabase);
 
   // ---------------- STATE ----------------
-
+  bool _isHydrating = false;
   int? selectedCustomer;
   int? selectedSite;
 
@@ -76,6 +76,7 @@ class BookingController extends ChangeNotifier {
   // ---------------- AVAILABILITY ----------------
 
   Future<void> computeBookableDates() async {
+    if (_isHydrating) return;
     if (supabase.auth.currentSession == null) {
       return;
     }
@@ -148,6 +149,7 @@ class BookingController extends ChangeNotifier {
   }
 
   Future<void> computeStartTimes() async {
+    if (_isHydrating) return;
     if (selectedCustomer == null ||
         selectedSite == null ||
         selectedVehicleType == null ||
@@ -217,6 +219,10 @@ class BookingController extends ChangeNotifier {
       ..clear()
       ..addAll(result);
 
+    if (selectedStartTime != null &&
+        !availableStartTimes.contains(selectedStartTime)) {
+      availableStartTimes.insert(0, selectedStartTime!);
+    }
     computingTimes = false;
     notifyListeners();
   }
@@ -259,6 +265,7 @@ class BookingController extends ChangeNotifier {
       selectedStartTime = storedStart;
 
       notifyListeners();
+      _isHydrating = false;
 
       return HydratedBookingResult.success(
         restoredDate: selectedDate!,
@@ -266,6 +273,7 @@ class BookingController extends ChangeNotifier {
         booking: row,
       );
     } catch (e) {
+      _isHydrating = false;
       return HydratedBookingResult.invalidDate();
     }
   }
