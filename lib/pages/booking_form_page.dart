@@ -42,10 +42,12 @@ enum BookingFormMode { create, edit, view }
 
 class BookingFormPage extends StatefulWidget {
   final BookingFormMode mode;
+  final String? returnRoute;
 
   const BookingFormPage({
     super.key,
     this.mode = BookingFormMode.create,
+    this.returnRoute,
   });
 
   @override
@@ -219,7 +221,9 @@ class _BookingFormPageState extends State<BookingFormPage> {
           '${restoredDate.day}/${restoredDate.month}/${restoredDate.year}';
     }
 
-    _eventsFuture = _fetchBookingEvents();
+    if (editingBookingId != null) {
+      _eventsFuture = _fetchBookingEvents();
+    }
     if (!mounted) return;
     setState(() => loading = false);
   }
@@ -502,11 +506,19 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                   children: [
                                     _sectionTitle('Booking Slot'),
 
-                                    if (editingBookingId != null)
-                                      Row(
-                                        children: [
-
-                                          if (isView && bookingStatus != 'received' && bookingStatus != 'cancelled')
+                                    Row(
+                                      children: [
+                                        if (!isCreate)
+                                        OutlinedButton.icon(
+                                          icon: const Icon(Icons.close, size: 18),
+                                          label: const Text('Close'),
+                                          onPressed: _handleClose,
+                                        ),
+                                        if (editingBookingId != null) const SizedBox(width: 12),
+                                        if (editingBookingId != null) ...[
+                                          if (isView &&
+                                              bookingStatus != 'received' &&
+                                              bookingStatus != 'cancelled')
                                             ElevatedButton.icon(
                                               icon: const Icon(Icons.edit, size: 18),
                                               label: const Text('Edit'),
@@ -525,7 +537,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                             onPressed: _addComment,
                                           ),
                                         ],
-                                      ),
+                                      ],
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 16),
@@ -909,6 +922,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
   // ---------------- ACTIONS ----------------
+  void _handleClose() {
+    // Priority 1: explicit route
+    if (widget.returnRoute != null) {
+      Navigator.pushReplacementNamed(context, widget.returnRoute!);
+      return;
+    }
+
+    // Priority 2: normal back stack
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+      return;
+    }
+
+    // Fallback (direct URL access)
+    Navigator.pushReplacementNamed(context, '/inbound-overview');
+  }
+
   void _refreshConfirmState() {
     setState(() {});
   }
@@ -987,14 +1017,18 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
   Future<List<Map<String, dynamic>>> _fetchBookingEvents() async {
-      final response = await supabase
-          .from('booking_events_view')
-          .select()
-          .eq('booking_id', editingBookingId!)
-          .order('event_timestamp', ascending: false);
-
-      return List<Map<String, dynamic>>.from(response);
+    if (editingBookingId == null) {
+      return [];
     }
+
+    final response = await supabase
+        .from('booking_events_view')
+        .select()
+        .eq('booking_id', editingBookingId!)
+        .order('event_timestamp', ascending: false);
+
+    return List<Map<String, dynamic>>.from(response);
+  }
   String _formatEventTime(DateTime dt) {
     return DateFormat('dd/MM/yyyy HH:mm').format(dt);
   }
@@ -1194,10 +1228,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
           TextButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
-              Navigator.of(context).pushNamedAndRemoveUntil(
-                '/inbound-overview',
-                (route) => false,
-              );
+              _handleClose();
             },
             child: const Text('Yes'),
           ),

@@ -299,9 +299,14 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   }
 
   Future<void> _openCreateBooking() async {
-    final result = await Navigator.pushNamed(
+    final result = await Navigator.push(
       context,
-      '/booking-form',
+      MaterialPageRoute(
+        builder: (_) => BookingFormPage(
+          mode: BookingFormMode.create,
+          returnRoute: '/all-bookings',
+        ),
+      ),
     );
 
     if (!mounted) return;
@@ -330,10 +335,17 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   }
 
   Future<void> _openEditBooking(String bookingId) async {
-    final result = await Navigator.pushNamed(
+    final result = await Navigator.push(
       context,
-      '/booking-form',
-      arguments: {'booking_id': bookingId},
+      MaterialPageRoute(
+        builder: (_) => BookingFormPage(
+          mode: BookingFormMode.edit,
+          returnRoute: '/all-bookings',
+        ),
+        settings: RouteSettings(
+          arguments: {'booking_id': bookingId},
+        ),
+      ),
     );
 
     if (!mounted) return;
@@ -362,13 +374,19 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   }
 
   Future<void> _openViewBooking(String bookingId) async {
-    await Navigator.pushNamed(
+    await Navigator.push(
       context,
-      '/booking-form',
-      arguments: {
-        'booking_id': bookingId,
-        'mode': BookingFormMode.view,
-      },
+      MaterialPageRoute(
+        builder: (_) => BookingFormPage(
+          mode: BookingFormMode.view,
+          returnRoute: '/all-bookings',
+        ),
+        settings: RouteSettings(
+          arguments: {
+            'booking_id': bookingId,
+          },
+        ),
+      ),
     );
 
     if (!mounted) return;

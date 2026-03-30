@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/brand_colors.dart';
+import '../pages/booking_form_page.dart';
 
 class AppScaffold extends StatefulWidget {
   final String title;
@@ -84,7 +85,19 @@ class _AppScaffoldState extends State<AppScaffold> {
 
             ListTile(
               title: const Text('Make a Booking'),
-              onTap: () => _go(context, '/booking-form'),
+              onTap: () {
+                Navigator.of(context).pop();
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BookingFormPage(
+                      mode: BookingFormMode.create,
+                      returnRoute: '/inbound-overview',
+                    ),
+                  ),
+                );
+              },
             ),
 
             if (_effectiveRole == 'internal_admin' ||

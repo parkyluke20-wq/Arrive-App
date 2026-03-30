@@ -231,9 +231,15 @@ class _InboundOverviewPageState
                 horizontal: 26,
                 vertical: 20),
       ),
-      onPressed: () =>
-          Navigator.pushNamed(
-              context, '/booking-form'),
+      onPressed: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BookingFormPage(
+            mode: BookingFormMode.create,
+            returnRoute: '/inbound-overview',
+          ),
+        ),
+      ),
       icon: const Icon(Icons.add),
       label: Text(
         'Book a Delivery',
@@ -411,13 +417,19 @@ class _InboundOverviewPageState
                                           minWidth: 28,
                                           minHeight: 28,
                                         ),
-                                        onPressed: () => Navigator.pushNamed(
+                                        onPressed: () => Navigator.push(
                                           context,
-                                          '/booking-form',
-                                          arguments: {
-                                            'booking_id': booking['booking_id'],
-                                            'mode': BookingFormMode.view,
-                                          },
+                                          MaterialPageRoute(
+                                            builder: (_) => BookingFormPage(
+                                              mode: BookingFormMode.view,
+                                              returnRoute: '/inbound-overview',
+                                            ),
+                                            settings: RouteSettings(
+                                              arguments: {
+                                                'booking_id': booking['booking_id'],
+                                              },
+                                            ),
+                                          ),
                                         ),
                                       ),
                                     ),
