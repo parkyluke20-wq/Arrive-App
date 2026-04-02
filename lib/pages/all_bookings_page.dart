@@ -304,7 +304,6 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       MaterialPageRoute(
         builder: (_) => BookingFormPage(
           mode: BookingFormMode.create,
-          returnRoute: '/all-bookings',
         ),
       ),
     );
@@ -340,7 +339,6 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       MaterialPageRoute(
         builder: (_) => BookingFormPage(
           mode: BookingFormMode.edit,
-          returnRoute: '/all-bookings',
         ),
         settings: RouteSettings(
           arguments: {'booking_id': bookingId},
@@ -379,7 +377,6 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       MaterialPageRoute(
         builder: (_) => BookingFormPage(
           mode: BookingFormMode.view,
-          returnRoute: '/all-bookings',
         ),
         settings: RouteSettings(
           arguments: {

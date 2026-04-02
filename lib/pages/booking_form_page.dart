@@ -923,19 +923,13 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
   // ---------------- ACTIONS ----------------
   void _handleClose() {
-    // Priority 1: explicit route
-    if (widget.returnRoute != null) {
-      Navigator.pushReplacementNamed(context, widget.returnRoute!);
-      return;
-    }
-
-    // Priority 2: normal back stack
+    // Priority 1: return to previous page (preserves state)
     if (Navigator.canPop(context)) {
       Navigator.pop(context);
       return;
     }
 
-    // Fallback (direct URL access)
+    // Fallback (direct URL / no stack)
     Navigator.pushReplacementNamed(context, '/inbound-overview');
   }
 
