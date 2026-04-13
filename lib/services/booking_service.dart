@@ -115,7 +115,7 @@ class BookingService {
 
   // ---------------- CONFIRM BOOKING ----------------
 
-  Future<void> confirmBooking({
+  Future<Map<String, dynamic>> confirmBooking({
     required BookingController controller,
     required int vehicleTypeId,
     required int slotUnitsRequired,
@@ -168,16 +168,19 @@ class BookingService {
     );
 
     try {
-
+      Map<String, dynamic>? bookingRow;
       // ---------- INSERT OR UPDATE BOOKING ----------
       if (bookingId != null) {
 
-        await supabase
+        final update = await supabase
             .from('bookings')
             .update(payload)
-            .eq('booking_id', bookingId);
+            .eq('booking_id', bookingId)
+            .select('booking_id, booking_ref')
+            .single();
 
-        resolvedBookingId = bookingId;
+        resolvedBookingId = update['booking_id'].toString();
+        bookingRow = update;
 
       } else {
 
@@ -192,10 +195,11 @@ class BookingService {
         final insert = await supabase
             .from('bookings')
             .insert(insertPayload)
-            .select('booking_id')
+            .select('booking_id, booking_ref') // ADD booking_ref
             .single();
 
         resolvedBookingId = insert['booking_id'].toString();
+        bookingRow = insert;
       }
 
       // ---------- PACKING LIST LOGIC ----------
@@ -240,7 +244,10 @@ class BookingService {
             .eq('booking_id', resolvedBookingId)
             .select();
       }
-
+    if (bookingRow == null) {
+      throw Exception('Booking row not returned');
+    }
+    return bookingRow;
     } catch (e) {
 
       if (bookingId == null && resolvedBookingId != null) {

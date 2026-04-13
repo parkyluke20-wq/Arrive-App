@@ -1335,7 +1335,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
               }
 
               try {
-                await bookingService.confirmBooking(
+                final booking = await bookingService.confirmBooking(
                   controller: bookingController,
                   bookingId: editingBookingId,
                   vehicleTypeId:
@@ -1360,6 +1360,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                   existingPackingListPath: existingPackingListPath,
                   packingListRemoved: packingListRemoved,
                 );
+                final bookingRef = booking['booking_ref'];
 
                 if (!mounted) return;
 
@@ -1370,6 +1371,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                   arguments: {
                     'booking_confirmed': true,
                     'was_edit': editingBookingId != null,
+                    'booking_ref': bookingRef, 
                   },
                 );
 

@@ -72,7 +72,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     var query = supabase
       .from('bookings')
       .select(
-        'booking_id,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name),qty_cases,qty_pallets',
+        'booking_id,booking_ref,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name),qty_cases,qty_pallets',
       );
 
   if (!_statusFilter.contains('all')) {
@@ -262,11 +262,16 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     if (_referenceSearch.isEmpty) {
       _bookings = List<Map<String, dynamic>>.from(_allBookings);
     } else {
+      final search = _referenceSearch.toLowerCase();
+
       _bookings = _allBookings.where((b) {
         final ref = (b['reference'] ?? '').toString().toLowerCase();
-        return ref.contains(_referenceSearch.toLowerCase());
+        final bookingRef = (b['booking_ref'] ?? '').toString().toLowerCase();
+
+        return ref.contains(search) || bookingRef.contains(search);
       }).toList();
     }
+
     _applySorting();
   }
 
@@ -872,7 +877,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
               child: TextField(
                 controller: _referenceSearchController,
                 decoration: const InputDecoration(
-                  hintText: 'Search reference...',
+                  hintText: 'Search...',
                   prefixIcon: Icon(Icons.search),
                   isDense: true,
                   border: OutlineInputBorder(),
@@ -897,6 +902,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     final timeFmt = DateFormat('HH:mm');
 
     const double actionW = 180;
+    const double bookingRefW = 120;
     const double refW = 200;
     const double statusW = 110;
     const double siteW = 120;
@@ -909,6 +915,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
     const double tableWidth =
     actionW +
+    bookingRefW +
     refW +
     statusW +
     siteW +
@@ -988,6 +995,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                 child: Row(
                   children: [
                     headerCell('Action', actionW, 'action'),
+                    headerCell('Booking Ref', bookingRefW, 'booking_ref'),
                     headerCell('Reference', refW, 'reference'),
                     headerCell('Status', statusW, 'status'),
                     headerCell('Site', siteW, 'site'),
@@ -1104,6 +1112,10 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                     ),
                                 ],
                               ),
+                            ),
+                            dataCell(
+                              (booking['booking_ref'] ?? '').toString(),
+                              bookingRefW,
                             ),
                             dataCell(
                                 booking['reference'] ?? '',

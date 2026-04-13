@@ -44,9 +44,8 @@ class _InboundOverviewPageState
     if (_didHandleRouteArgs) return;
     _didHandleRouteArgs = true;
 
-    final args =
-    ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-
+    final args =ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    final bookingRef = args?['booking_ref'];    
       if (args != null && args['booking_confirmed'] == true) {
       final wasEdit = args['was_edit'] == true;
 
@@ -58,7 +57,7 @@ class _InboundOverviewPageState
             content: Text(
               wasEdit
                   ? 'Booking updated successfully'
-                  : 'Booking confirmed successfully',
+                  : 'Booking confirmed successfully. Booking ID: ${bookingRef ?? ''}',
             ),
           ),
         );
@@ -119,12 +118,11 @@ class _InboundOverviewPageState
     final now = DateTime.now();
 
     final response = await supabase
-        .from('bookings')
-        .select(
-            'booking_id,start_time,reference,status,carrier,qty_pallets,qty_cases,packing_list_path,vehicle_types(name),customers(customer_code),sites(site_name)')
-        .eq('status', 'booked')
-        .gt('start_time', now.toIso8601String())
-        .order('start_time', ascending: true);
+      .from('bookings')
+      .select('booking_id,booking_ref,start_time,reference,status,carrier,qty_pallets,qty_cases,packing_list_path,vehicle_types(name),customers(customer_code),sites(site_name)')
+      .eq('status', 'booked')
+      .gt('start_time', now.toIso8601String())
+      .order('start_time', ascending: true);
 
     if (!mounted) return;
 
@@ -260,6 +258,7 @@ class _InboundOverviewPageState
     final timeFmt = DateFormat('HH:mm');
 
     const actionW = 150.0;
+    const bookingRefW = 120.0;
     const refW = 200.0;
     const statusW = 110.0;
     const siteW = 120.0;
@@ -273,6 +272,7 @@ class _InboundOverviewPageState
 
     const tableWidth =
         actionW + 
+        bookingRefW + 
         refW +
         statusW +
         siteW +
@@ -332,35 +332,18 @@ class _InboundOverviewPageState
                             horizontal: 12),
                 child: Row(
                   children: [
-                    headerCell(
-                        'Actions',
-                        actionW),
-                    headerCell(
-                        'Reference',
-                        refW),
-                    headerCell(
-                        'Status',
-                        statusW),
-                    headerCell(
-                        'Site', siteW),
-                    headerCell(
-                        'Customer',
-                        customerW),
-                    headerCell(
-                        'Type', typeW),
-                    headerCell(
-                        'Carrier',
-                        carrierW),
-                    headerCell(
-                        'Date', dateW),
-                    headerCell(
-                        'Time', timeW),
-                    headerCell(
-                        'Pallets',
-                        palletsW),
-                    headerCell(
-                        'Cases',
-                        casesW),
+                    headerCell('Actions',actionW),
+                    headerCell('Booking Ref', bookingRefW),
+                    headerCell('Reference',refW),
+                    headerCell('Status',statusW),
+                    headerCell('Site', siteW),
+                    headerCell('Customer',customerW),
+                    headerCell('Type', typeW),
+                    headerCell('Carrier',carrierW),
+                    headerCell('Date', dateW),
+                    headerCell('Time', timeW),
+                    headerCell('Pallets',palletsW),
+                    headerCell('Cases',casesW),
                   ],
                 ),
               ),
@@ -468,57 +451,17 @@ class _InboundOverviewPageState
                                   ],
                                 ),
                               ),
-                              dataCell(
-                                  booking['reference'] ??
-                                      '',
-                                  refW),
-                              dataCell(
-                                  _formatStatus(booking['status']),
-                                  statusW),
-                              dataCell(
-                                  booking[
-                                          'sites']
-                                      ?[
-                                          'site_name'] ??
-                                      '—',
-                                  siteW),
-                              dataCell(
-                                  booking[
-                                          'customers']
-                                      ?[
-                                          'customer_code'] ??
-                                      '—',
-                                  customerW),
-                              dataCell(
-                                  booking[
-                                          'vehicle_types']
-                                      ?['name'] ??
-                                      '—',
-                                  typeW),
-                              dataCell(
-                                  booking[
-                                          'carrier']
-                                      ?.toString() ??
-                                      '',
-                                  carrierW),
-                              dataCell(
-                                  dateFmt.format(
-                                      startTime),
-                                  dateW),
-                              dataCell(
-                                  timeFmt.format(
-                                      startTime),
-                                  timeW),
-                              dataCell(
-                                  booking['qty_pallets']
-                                      ?.toString() ??
-                                      '',
-                                  palletsW),
-                              dataCell(
-                                  booking['qty_cases']
-                                      ?.toString() ??
-                                      '',
-                                  casesW),
+                              dataCell((booking['booking_ref'] ?? '').toString(),bookingRefW,),
+                              dataCell(booking['reference'] ??'',refW),
+                              dataCell(_formatStatus(booking['status']),statusW),
+                              dataCell(booking['sites']?['site_name'] ??'—',siteW),
+                              dataCell(booking['customers']?['customer_code'] ??'—',customerW),
+                              dataCell(booking['vehicle_types']?['name'] ??'—',typeW),
+                              dataCell(booking['carrier']?.toString() ??'',carrierW),
+                              dataCell(dateFmt.format(startTime),dateW),
+                              dataCell(timeFmt.format(startTime),timeW),
+                              dataCell(booking['qty_pallets']?.toString() ??'',palletsW),
+                              dataCell(booking['qty_cases']?.toString() ??'',casesW),
                             ],
                           ),
                         );

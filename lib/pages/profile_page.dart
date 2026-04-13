@@ -9,6 +9,7 @@ enum EffectiveRole {
   customerAdmin,
   internalUser,
   internalAdmin,
+  supplierUser,
 }
 
 extension EffectiveRoleUi on EffectiveRole {
@@ -22,6 +23,8 @@ extension EffectiveRoleUi on EffectiveRole {
         return 'Internal User';
       case EffectiveRole.internalAdmin:
         return 'Internal Admin';
+      case EffectiveRole.supplierUser:
+        return 'Supplier User';
     }
   }
 }
@@ -118,6 +121,8 @@ class _ProfilePageState extends State<ProfilePage> {
         return EffectiveRole.internalUser;
       case 'internal_admin':
         return EffectiveRole.internalAdmin;
+      case 'supplier_user':
+        return EffectiveRole.supplierUser;
       default:
         throw Exception('Unknown role');
     }
@@ -547,6 +552,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ],
 
                 if (effectiveRole != EffectiveRole.customerUser &&
+                    effectiveRole != EffectiveRole.supplierUser &&
                     customers.isNotEmpty) ...[
                   const SizedBox(height: 32),
                   const Text(
@@ -584,11 +590,12 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ],
 
-                const SizedBox(height: 24),
-                const Text(
-                  'Invite User',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
+                if (effectiveRole != EffectiveRole.supplierUser) ...[
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Invite User',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -623,7 +630,9 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ],
                 ),
+                ],
 
+                if (effectiveRole != EffectiveRole.supplierUser) ...[
                 const SizedBox(height: 32),
                 const Text(
                   'Members',
@@ -636,6 +645,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   children: members.map(_memberRow).toList(),
                 ),
               ),
+                ],
               ],
             ),
           ),
