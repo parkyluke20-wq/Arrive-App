@@ -195,6 +195,8 @@ class _InboundOverviewPageState
           );
         }
 
+        final isEmpty = _bookings.isEmpty;
+
         return Align(
           alignment: Alignment.centerLeft,
           child: ConstrainedBox(
@@ -209,12 +211,42 @@ class _InboundOverviewPageState
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                _buildCreateButton(),
+                if (!isEmpty) _buildCreateButton(),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.event_available,
+            size: 64,
+            color: Colors.black26,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'No upcoming deliveries',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'You don’t have any deliveries booked.',
+            style: TextStyle(color: Colors.black54),
+          ),
+          const SizedBox(height: 24),
+          _buildCreateButton(),
+        ],
+      ),
     );
   }
 
@@ -254,6 +286,9 @@ class _InboundOverviewPageState
   // ─────────────────────────────────────────────
 
   Widget _buildTable() {
+    if (_bookings.isEmpty) {
+      return _buildEmptyState();
+    }
     final dateFmt = DateFormat('dd/MM/yyyy');
     final timeFmt = DateFormat('HH:mm');
 

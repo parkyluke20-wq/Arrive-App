@@ -15,7 +15,20 @@ import 'pages/all_bookings_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/reserve_slots_page.dart';
 
-const String appVersion = '1.2';
+// v1.3 update: New user role functionality deployed for Supplier user
+const String appVersion = '1.3';
+
+Future<void> checkAppVersion() async {
+  final prefs = await SharedPreferences.getInstance();
+  final savedVersion = prefs.getString('app_version');
+
+  if (savedVersion != appVersion) {
+    await prefs.setString('app_version', appVersion);
+
+    html.window.location.href =
+        '${html.window.location.pathname}?v=$appVersion';
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,7 +40,7 @@ Future<void> main() async {
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvend4YW5temFtdXRqenRveGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MDg1ODAsImV4cCI6MjA4NTE4NDU4MH0.c_JcOuGel2K94PFUZW78y2t6wUiCV4JEOs0DMtxmc54',
   );
-
+  await checkAppVersion();
   runApp(const InboundBookingApp());
 }
 
@@ -44,7 +57,6 @@ class _InboundBookingAppState extends State<InboundBookingApp> {
   @override
   void initState() {
     super.initState();
-    _checkAppVersion(); 
     _startSession();
   }
 
@@ -64,22 +76,13 @@ class _InboundBookingAppState extends State<InboundBookingApp> {
     Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
   }
 
-  Future<void> _checkAppVersion() async {
-  final prefs = await SharedPreferences.getInstance();
-  final savedVersion = prefs.getString('app_version');
-
-  if (savedVersion != appVersion) {
-    await prefs.setString('app_version', appVersion);
-    html.window.location.reload();
-  }
-}
-
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Listener(
       behavior: HitTestBehavior.translucent,
-      onTap: _resetSession,
-      onPanDown: (_) => _resetSession(),
+      onPointerDown: (_) => _resetSession(),
+      onPointerMove: (_) => _resetSession(),
+      onPointerSignal: (_) => _resetSession(),
 
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
