@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import '../layouts/app_scaffold.dart';
 import '../theme/brand_colors.dart';
+import 'dart:convert';
+import 'package:flutter/services.dart';
 
 enum EffectiveRole {
   customerUser,
@@ -11,6 +14,8 @@ enum EffectiveRole {
   internalAdmin,
   supplierUser,
 }
+
+enum UserType { customer, supplier, internal }
 
 extension EffectiveRoleUi on EffectiveRole {
   String get label {
@@ -56,8 +61,6 @@ class _ProfilePageState extends State<ProfilePage> {
   int? selectedCustomerId;
 
   List<Map<String, dynamic>> members = [];
-
-  final TextEditingController inviteEmailController = TextEditingController();
 
   bool showPasswordForm = false;
   bool updatingPassword = false;
@@ -416,64 +419,6 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // ---------------------------------------------------------------------------
-  // INVITE
-  // ---------------------------------------------------------------------------
-
-  Future<void> _inviteUser() async {
-    final email = inviteEmailController.text.trim();
-    if (email.isEmpty) return;
-
-    int? inviteCustomerId;
-
-    if (effectiveRole == EffectiveRole.customerAdmin ||
-        effectiveRole == EffectiveRole.customerUser) {
-      inviteCustomerId =
-          customers.isNotEmpty ? customers.first['customer_id'] : null;
-    } else {
-      inviteCustomerId = selectedCustomerId;
-    }
-
-    if (inviteCustomerId == null) return;
-
-    final customerName = customers
-        .firstWhere((c) => c['customer_id'] == inviteCustomerId)['customer_name'];
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Confirm Invite'),
-        content: Text('Invite $email to $customerName?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Invite'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    await supabase.from('invites').upsert(
-      {
-        'email': email,
-        'role': 'customer_user',
-        'scope_type': 'customer',
-        'scope_type_id': inviteCustomerId,
-        'created_by': currentUserId,
-      },
-      onConflict: 'email',
-    );
-
-    inviteEmailController.clear();
-    _snack('Invite sent');
-  }
-
-  // ---------------------------------------------------------------------------
   // UI
   // ---------------------------------------------------------------------------
 
@@ -510,16 +455,42 @@ class _ProfilePageState extends State<ProfilePage> {
                 _detailRow('Role', effectiveRole.label),
                 const SizedBox(height: 16),
 
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: BrandColors.lightBlue,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () =>
-                      setState(() => showPasswordForm = !showPasswordForm),
-                  child: Text(
-                    showPasswordForm ? 'Cancel' : 'Update Password',
-                  ),
+                Row(
+                  children: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: BrandColors.lightBlue,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () =>
+                          setState(() => showPasswordForm = !showPasswordForm),
+                      child: Text(
+                        showPasswordForm ? 'Cancel' : 'Update Password',
+                      ),
+                    ),
+
+                    const SizedBox(width: 12), // spacing between buttons
+
+                  if (effectiveRole == EffectiveRole.internalUser ||
+                  effectiveRole == EffectiveRole.internalAdmin) ...[
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: BrandColors.lightBlue,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (_) => _CreateUserDialog(
+                            customers: customers,
+                            effectiveRole: effectiveRole,
+                          ),
+                        );
+                      },
+                      child: const Text('Create New User'),
+                    ),
+                    ],
+                  ],
                 ),
 
                 if (showPasswordForm) ...[
@@ -590,47 +561,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ],
 
-                if (effectiveRole != EffectiveRole.supplierUser) ...[
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Invite User',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: inviteEmailController,
-                        decoration: const InputDecoration(
-                          labelText: 'Email',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: BrandColors.green,
-                          foregroundColor: BrandColors.charcoal,
-                        ),
-                        onPressed: null,
-                        child: const Text('Invite'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      'Coming soon...',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey,
-                      ),
-                    ),
-                  ],
-                ),
-                ],
 
                 if (effectiveRole != EffectiveRole.supplierUser) ...[
                 const SizedBox(height: 32),
@@ -679,3 +610,391 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 }
+
+class _CreateUserDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> customers;
+  final EffectiveRole effectiveRole;
+
+  const _CreateUserDialog({
+    required this.customers,
+    required this.effectiveRole,
+  });
+
+  @override
+  State<_CreateUserDialog> createState() => _CreateUserDialogState();
+}
+
+class _CreateUserDialogState extends State<_CreateUserDialog> {
+  @override
+  void initState() {
+    super.initState();
+
+    nameController.addListener(() => setState(() {}));
+    emailController.addListener(() => setState(() {}));
+
+    _loadSites();
+  }
+  List<Map<String, dynamic>> sites = [];
+  final nameController = TextEditingController();
+  final emailController = TextEditingController();
+
+  UserType? selectedType;
+  int? selectedCustomerId;
+  int? selectedSiteId;
+
+  bool _isValid() {
+    if (nameController.text.trim().isEmpty) return false;
+    if (emailController.text.trim().isEmpty) return false;
+    if (selectedType == null) return false;
+
+    if (selectedType == UserType.customer ||
+        selectedType == UserType.supplier) {
+      return selectedCustomerId != null;
+    }
+    if (selectedType == UserType.internal) {
+      return selectedSiteId != null;
+    }
+
+    return false;
+  }
+
+  bool submitting = false;
+
+  Future<void> _loadSites() async {
+    final res = await Supabase.instance.client
+        .from('sites')
+        .select('site_id, site_name');
+
+    sites = List<Map<String, dynamic>>.from(res);
+  }
+
+  @override
+    Widget build(BuildContext context) {
+      return AlertDialog(
+        title: const Text('Create User'),
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              const SizedBox(height: 40),
+              TextField(
+                controller: emailController,
+                decoration: const InputDecoration(labelText: 'Email'),
+              ),
+              const SizedBox(height: 40),
+
+              DropdownButtonFormField2<UserType>(
+                isExpanded: true,
+                value: selectedType,
+                decoration: const InputDecoration(
+                  labelText: 'User Type',
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(value: UserType.customer, child: Text('Customer')),
+                  DropdownMenuItem(value: UserType.supplier, child: Text('Supplier')),
+                  DropdownMenuItem(value: UserType.internal, child: Text('Internal')),
+                ],
+                dropdownStyleData: const DropdownStyleData(
+                  maxHeight: 260,
+                ),
+                menuItemStyleData: const MenuItemStyleData(
+                  height: 32,
+                ),
+                onChanged: (v) => setState(() => selectedType = v),
+              ),
+
+              const SizedBox(height: 60),
+
+              if (selectedType == UserType.customer ||
+                  selectedType == UserType.supplier)
+                DropdownButtonFormField2<int>(
+                  isExpanded: true,
+                  value: selectedCustomerId,
+                  decoration: const InputDecoration(
+                    labelText: 'Customer',
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: widget.customers
+                      .map((c) => DropdownMenuItem<int>(
+                            value: c['customer_id'],
+                            child: Text(
+                              c['customer_name'],
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ))
+                      .toList(),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 260,
+                  ),
+                  menuItemStyleData: const MenuItemStyleData(
+                    height: 32,
+                  ),
+                  onChanged: (v) => setState(() => selectedCustomerId = v),
+                ),
+              const SizedBox(height: 20),
+
+              if (selectedType == UserType.internal)
+                DropdownButtonFormField2<int>(
+                  isExpanded: true,
+                  value: selectedSiteId,
+                  decoration: const InputDecoration(
+                    labelText: 'Site',
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: sites
+                      .map((s) => DropdownMenuItem<int>(
+                            value: s['site_id'],
+                            child: Text(
+                              s['site_name'],
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ))
+                      .toList(),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 260,
+                  ),
+                  menuItemStyleData: const MenuItemStyleData(
+                    height: 32,
+                  ),
+                  onChanged: (v) => setState(() => selectedSiteId = v),
+                ),
+
+
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: (!_isValid() || submitting) ? null : _submit,
+            child: submitting
+                ? const CircularProgressIndicator()
+                : const Text('Create'),
+          ),
+        ],
+      );
+    }
+
+    Future<void> _submit() async {
+      setState(() => submitting = true);
+
+      final name = _toProperCase(nameController.text.trim());
+      final email = emailController.text.trim();
+
+      if (name.isEmpty || email.isEmpty || selectedType == null) {
+        return;
+      }
+
+      String role;
+      String scopeType;
+      int scopeId;
+
+      switch (selectedType!) {
+        case UserType.customer:
+          role = 'customer_user';
+          scopeType = 'customer';
+          scopeId = selectedCustomerId!;
+          break;
+        case UserType.supplier:
+          role = 'supplier_user';
+          scopeType = 'customer';
+          scopeId = selectedCustomerId!;
+          break;
+        case UserType.internal:
+          role = 'internal_user';
+          scopeType = 'site';
+          scopeId = selectedSiteId!;
+          break;
+      }
+
+      final csv =
+      'email,name,role,scope_type,scope_id\n'
+      '$email,$name,$role,$scopeType,$scopeId';
+
+      print('CREATE USER: calling function...');
+
+      try {
+        final response = await http.post(
+          Uri.parse('https://eozwxanmzamutjztoxbo.supabase.co/functions/v1/bulk_create_users_from_app'),
+          headers: {
+            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvend4YW5temFtdXRqenRveGJvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTYwODU4MCwiZXhwIjoyMDg1MTg0NTgwfQ.O0UlhIQSDK3jYMbZESITa6ThNeWH6ICf17SoJnb1l5w',
+            'Content-Type': 'text/csv',
+          },
+          body: csv,
+        );
+
+        print('STATUS: ${response.statusCode}');
+        print('BODY: ${response.body}');
+
+        if (response.statusCode != 200) {
+          setState(() => submitting = false);
+          _snack('Failed: ${response.body}');
+          return;
+        }
+        final result = response.body;
+
+        setState(() => submitting = false);
+
+        // close create dialog
+        final parentContext = context;
+        Navigator.pop(context);
+
+        Future.microtask(() {
+          _showResultDialog(parentContext, result);
+        });
+
+      } catch (e) {
+        print('CREATE USER ERROR: $e');
+        setState(() => submitting = false);
+        _snack('Error: $e');
+      }
+    }
+  
+    String _toProperCase(String input) {
+    return input
+        .toLowerCase()
+        .split(' ')
+        .map((word) {
+          if (word.isEmpty) return word;
+          return word[0].toUpperCase() + word.substring(1);
+        })
+        .join(' ');
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+  void _showResultDialog(BuildContext context, String result) {
+    List<dynamic> parsed = [];
+
+    try {
+      final decoded = jsonDecode(result);
+      if (decoded is List) {
+        parsed = decoded;
+      }
+    } catch (e) {
+      parsed = [];
+    }
+
+    final buffer = StringBuffer();
+
+    for (final u in parsed) {
+      if (u is Map<String, dynamic>) {
+        final status = u['status'];
+
+        buffer.writeln('Name: ${u['name'] ?? ''}');
+        buffer.writeln('Email: ${u['email'] ?? ''}');
+
+        if (status == 'created') {
+          buffer.writeln('Password: ${u['password'] ?? ''}');
+        } else {
+          buffer.writeln('Status: Failed');
+          buffer.writeln('Reason: ${u['error'] ?? 'Unknown error'}');
+        }
+
+        buffer.writeln('');
+      }
+    }
+
+    final displayText = buffer.toString().trim();
+    final hasFailure = parsed.any((u) =>
+        u is Map<String, dynamic> && u['status'] != 'created');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(hasFailure ? 'User Creation Failed' : 'User Created!'),
+              IconButton( 
+                icon: const Icon(Icons.copy),
+                tooltip: 'Copy',
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: displayText));
+                  _snack('Copied to clipboard');
+                },
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 400,
+            child: SelectableText.rich(
+              TextSpan(
+                style: const TextStyle(fontSize: 14, color: Colors.black),
+                children: parsed.expand<InlineSpan>((u) {
+                  if (u is! Map<String, dynamic>) return <InlineSpan>[];
+
+                  final status = u['status'];
+
+                  return [
+                    const TextSpan(
+                      text: 'Name: ',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    TextSpan(text: '${u['name'] ?? ''}\n\n'),
+
+                    const TextSpan(
+                      text: 'Email: ',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    TextSpan(text: '${u['email'] ?? ''}\n\n'),
+
+                    if (status == 'created') ...[
+                      const TextSpan(
+                        text: 'Password: ',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      TextSpan(text: '${u['password'] ?? ''}\n\n'),
+                    ] else ...[
+                      const TextSpan(
+                        text: 'Status: ',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      TextSpan(text: 'Failed\n\n'),
+
+                      const TextSpan(
+                        text: 'Reason: ',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      TextSpan(text: '${u['error'] ?? 'Unknown error'}\n\n'),
+                    ],
+
+                    const TextSpan(text: '\n\n\n'),
+                  ];
+                }).toList(),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+  }

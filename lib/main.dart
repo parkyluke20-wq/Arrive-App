@@ -16,7 +16,8 @@ import 'pages/profile_page.dart';
 import 'pages/reserve_slots_page.dart';
 
 // v1.3 update: New user role functionality deployed for Supplier user
-const String appVersion = '1.3';
+// v1.4 update: Functionality added to profile page for internal users to create new users
+const String appVersion = '1.4';
 
 Future<void> checkAppVersion() async {
   final prefs = await SharedPreferences.getInstance();
