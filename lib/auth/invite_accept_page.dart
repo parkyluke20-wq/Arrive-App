@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../routing/app_routes.dart';
+import '../services/supabase_service.dart';
 import '../theme/brand_colors.dart';
 import '../theme/brand_text.dart';
 
@@ -29,7 +30,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
   }
 
   Future<void> _initialise() async {
-    final session = Supabase.instance.client.auth.currentSession;
+    final session = supabase.auth.currentSession;
 
     if (session == null || session.user == null) {
       _fail('Invalid or expired invitation link');
@@ -39,7 +40,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
     _user = session.user;
 
     try {
-      final existingUser = await Supabase.instance.client
+      final existingUser = await supabase
           .from('users')
           .select()
           .eq('user_id', _user.id)
@@ -49,7 +50,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
         await _provisionUser();
       }
 
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     } catch (_) {
       _fail('Unable to complete invitation');
     }
@@ -59,7 +60,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
     // NOTE:
     // customer_id + role MUST already be defined in invites table
     // This assumes you resolved invite → customer mapping server-side
-    final invite = await Supabase.instance.client
+    final invite = await supabase
         .from('invites')
         .select()
         .eq('email', _user.email!)
@@ -70,7 +71,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
       throw Exception('Invite not found');
     }
 
-    await Supabase.instance.client.from('users').insert({
+    await supabase.from('users').insert({
       'user_id': _user.id,
       'email': _user.email,
       'name': _user.email!.split('@').first,
@@ -79,7 +80,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
       'active': true,
     });
 
-    await Supabase.instance.client
+    await supabase
         .from('invites')
         .update({'accepted': true})
         .eq('invite_id', invite['invite_id']);
@@ -105,7 +106,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
     });
 
     try {
-      await Supabase.instance.client.auth.updateUser(
+      await supabase.auth.updateUser(
         UserAttributes(password: password),
       );
 
@@ -120,7 +121,7 @@ class _InviteAcceptPageState extends State<InviteAcceptPage> {
     } catch (_) {
       _setError('Failed to set password');
     } finally {
-      setState(() => _submitting = false);
+      if (mounted) setState(() => _submitting = false);
     }
   }
 

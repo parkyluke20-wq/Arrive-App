@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../constants/app_constants.dart';
+
 class SessionManager {
   static final SessionManager _instance = SessionManager._internal();
   factory SessionManager() => _instance;
@@ -7,7 +9,7 @@ class SessionManager {
 
   Timer? _timer;
 
-  final Duration timeout = const Duration(minutes: 240);
+  final Duration timeout = AppConstants.sessionTimeout;
 
   void start(void Function() onTimeout) {
     _timer?.cancel();

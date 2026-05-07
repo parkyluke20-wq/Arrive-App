@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../layouts/app_scaffold.dart';
+import '../services/supabase_service.dart';
 import '../theme/brand_colors.dart';
+// Intentionally web-only: dart:html is used to trigger a file download via an anchor element.
 import 'dart:html' as html;
 import '../pages/booking_form_page.dart';
 
@@ -16,12 +18,11 @@ class InboundOverviewPage extends StatefulWidget {
 
 class _InboundOverviewPageState
     extends State<InboundOverviewPage> {
-  final supabase = Supabase.instance.client;
-
   final ScrollController _horizontalController =
       ScrollController();
 
   bool _loading = true;
+  String? _error;
   List<Map<String, dynamic>> _bookings = [];
   bool _didHandleRouteArgs = false;
   String _formatStatus(String? status) {
@@ -80,6 +81,7 @@ class _InboundOverviewPageState
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Cancel Booking'),
         content: const Text(
           'Are you sure you want to cancel this booking?',
@@ -93,15 +95,22 @@ class _InboundOverviewPageState
             onPressed: () async {
               Navigator.pop(context);
 
-              await supabase
-                  .from('bookings')
-                  .update({
-                    'status': 'cancelled',
-                    'updated_at': DateTime.now().toIso8601String(),
-                  })
-                  .eq('booking_id', bookingId);
+              try {
+                await supabase
+                    .from('bookings')
+                    .update({
+                      'status': 'cancelled',
+                      'updated_at': DateTime.now().toIso8601String(),
+                    })
+                    .eq('booking_id', bookingId);
 
-              await _loadBookings();
+                await _loadBookings();
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Couldn't cancel booking — please try again")),
+                );
+              }
             },
             child: const Text('Yes'),
           ),
@@ -113,33 +122,47 @@ class _InboundOverviewPageState
   Future<void> _loadBookings() async {
     if (!mounted) return;
 
-    setState(() => _loading = true);
+    setState(() { _loading = true; _error = null; });
 
-    final now = DateTime.now();
+    try {
+      final now = DateTime.now();
 
-    final response = await supabase
-      .from('bookings')
-      .select('booking_id,booking_ref,start_time,reference,status,carrier,qty_pallets,qty_cases,packing_list_path,vehicle_types(name),customers(customer_code),sites(site_name)')
-      .eq('status', 'booked')
-      .gt('start_time', now.toIso8601String())
-      .order('start_time', ascending: true);
+      final response = await withRetry(() => supabase
+        .from('bookings')
+        .select('booking_id,booking_ref,start_time,reference,status,carrier,qty_pallets,qty_cases,packing_list_path,vehicle_types(name),customers(customer_code),sites(site_name)')
+        .eq('status', 'booked')
+        .gt('start_time', now.toIso8601String())
+        .order('start_time', ascending: true));
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _bookings = List<Map<String, dynamic>>.from(response);
-      _loading = false;
-    });
+      setState(() {
+        _bookings = List<Map<String, dynamic>>.from(response);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _loading = false; _error = "Couldn't load bookings — please try again"; });
+    }
   }
 
   Future<void> _downloadPackingList(String path) async {
-    final signedUrl = await supabase.storage
-        .from('booking-documents')
-        .createSignedUrl(path, 60);
+    if (!kIsWeb) return;
 
-    final anchor = html.AnchorElement(href: signedUrl)
-      ..setAttribute('download', '')
-      ..click();
+    try {
+      final signedUrl = await supabase.storage
+          .from('booking-documents')
+          .createSignedUrl(path, 60);
+
+      final anchor = html.AnchorElement(href: signedUrl)
+        ..setAttribute('download', '')
+        ..click();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Download failed — please try again')),
+      );
+    }
   }
 
   @override
@@ -150,9 +173,10 @@ class _InboundOverviewPageState
         padding:
             const EdgeInsets.fromLTRB(24, 32, 24, 24),
         child: _loading
-            ? const Center(
-                child: CircularProgressIndicator())
-            : Column(
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(child: Text(_error!))
+                : Column(
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
                 children: [
@@ -345,6 +369,41 @@ class _InboundOverviewPageState
           ),
         );
 
+    Widget linkCell(String? text, String? bookingId, double width) {
+      final label = (text ?? '—').toString();
+      return SizedBox(
+        width: width,
+        child: bookingId != null && text != null
+            ? MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => BookingFormPage(
+                        mode: BookingFormMode.view,
+                        returnRoute: '/inbound-overview',
+                      ),
+                      settings: RouteSettings(
+                        arguments: {'booking_id': bookingId},
+                      ),
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF1558D6),
+                      decoration: TextDecoration.underline,
+                      decorationColor: Color(0xFF1558D6),
+                    ),
+                  ),
+                ),
+              )
+            : Text(label, overflow: TextOverflow.ellipsis),
+      );
+    }
+
     return Scrollbar(
       controller: _horizontalController,
       thumbVisibility: true,
@@ -486,17 +545,17 @@ class _InboundOverviewPageState
                                   ],
                                 ),
                               ),
-                              dataCell((booking['booking_ref'] ?? '').toString(),bookingRefW,),
-                              dataCell(booking['reference'] ??'',refW),
+                              linkCell(booking['booking_ref']?.toString(), booking['booking_id']?.toString(), bookingRefW),
+                              dataCell(booking['reference'] ?? '—',refW),
                               dataCell(_formatStatus(booking['status']),statusW),
-                              dataCell(booking['sites']?['site_name'] ??'—',siteW),
-                              dataCell(booking['customers']?['customer_code'] ??'—',customerW),
-                              dataCell(booking['vehicle_types']?['name'] ??'—',typeW),
-                              dataCell(booking['carrier']?.toString() ??'',carrierW),
+                              dataCell(booking['sites']?['site_name'] ?? '—',siteW),
+                              dataCell(booking['customers']?['customer_code'] ?? '—',customerW),
+                              dataCell(booking['vehicle_types']?['name'] ?? '—',typeW),
+                              dataCell(booking['carrier']?.toString() ?? '—',carrierW),
                               dataCell(dateFmt.format(startTime),dateW),
                               dataCell(timeFmt.format(startTime),timeW),
-                              dataCell(booking['qty_pallets']?.toString() ??'',palletsW),
-                              dataCell(booking['qty_cases']?.toString() ??'',casesW),
+                              dataCell(booking['qty_pallets']?.toString() ?? '—',palletsW),
+                              dataCell(booking['qty_cases']?.toString() ?? '—',casesW),
                             ],
                           ),
                         );

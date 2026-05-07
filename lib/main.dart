@@ -3,10 +3,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'auth/auth_gate.dart';
+import 'auth/invite_accept_page.dart';
 import 'pages/reset_password_page.dart';
+import 'routing/app_routes.dart';
 import 'services/session_manager.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:html' as html;
+import 'services/supabase_service.dart';
+import 'services/user_session.dart';
+import 'theme/brand_colors.dart';
 
 // APP PAGES
 import 'pages/inbound_overview_page.dart';
@@ -14,22 +17,6 @@ import 'pages/booking_form_page.dart';
 import 'pages/all_bookings_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/reserve_slots_page.dart';
-
-// v1.3 update: New user role functionality deployed for Supplier user
-// v1.4 update: Functionality added to profile page for internal users to create new users
-const String appVersion = '1.4';
-
-Future<void> checkAppVersion() async {
-  final prefs = await SharedPreferences.getInstance();
-  final savedVersion = prefs.getString('app_version');
-
-  if (savedVersion != appVersion) {
-    await prefs.setString('app_version', appVersion);
-
-    html.window.location.href =
-        '${html.window.location.pathname}?v=$appVersion';
-  }
-}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,7 +28,6 @@ Future<void> main() async {
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvend4YW5temFtdXRqenRveGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MDg1ODAsImV4cCI6MjA4NTE4NDU4MH0.c_JcOuGel2K94PFUZW78y2t6wUiCV4JEOs0DMtxmc54',
   );
-  await checkAppVersion();
   runApp(const InboundBookingApp());
 }
 
@@ -70,11 +56,12 @@ class _InboundBookingAppState extends State<InboundBookingApp> {
   }
 
   void _handleTimeout() async {
-    await Supabase.instance.client.auth.signOut();
+    UserSession.instance.clear();
+    await supabase.auth.signOut();
 
     if (!mounted) return;
 
-    Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+    Navigator.of(context).pushNamedAndRemoveUntil(AppRoutes.root, (_) => false);
   }
 
   @override
@@ -87,6 +74,10 @@ class _InboundBookingAppState extends State<InboundBookingApp> {
 
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          scaffoldBackgroundColor: BrandColors.background,
+          canvasColor: BrandColors.background,
+        ),
 
         locale: const Locale('en', 'GB'),
         supportedLocales: const [
@@ -99,15 +90,16 @@ class _InboundBookingAppState extends State<InboundBookingApp> {
           GlobalCupertinoLocalizations.delegate,
         ],
 
-        initialRoute: '/',
+        initialRoute: AppRoutes.root,
         routes: {
-          '/': (_) => const AuthGate(),
-          '/reset-password': (_) => const ResetPasswordPage(),
-          '/inbound-overview': (_) => const InboundOverviewPage(),
-          '/booking-form': (_) => const BookingFormPage(),
-          '/all-bookings': (_) => const AllBookingsPage(),
-          '/profile': (_) => const ProfilePage(),
-          '/reserve-slots': (_) => const ReserveSlotsPage(),
+          AppRoutes.root: (_) => const AuthGate(),
+          AppRoutes.resetPassword: (_) => const ResetPasswordPage(),
+          AppRoutes.inboundOverview: (_) => const InboundOverviewPage(),
+          AppRoutes.bookingForm: (_) => const BookingFormPage(),
+          AppRoutes.allBookings: (_) => const AllBookingsPage(),
+          AppRoutes.profile: (_) => const ProfilePage(),
+          AppRoutes.reserveSlots: (_) => const ReserveSlotsPage(),
+          AppRoutes.inviteAccept: (_) => const InviteAcceptPage(),
         },
       ),
     );

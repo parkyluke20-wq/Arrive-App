@@ -1,7 +1,11 @@
+import 'dart:html' as html;
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../theme/brand_text.dart';
+import '../services/supabase_service.dart';
+import '../services/user_session.dart';
 import '../theme/brand_colors.dart';
 
 class ResetPasswordPage extends StatefulWidget {
@@ -12,47 +16,52 @@ class ResetPasswordPage extends StatefulWidget {
 }
 
 class _ResetPasswordPageState extends State<ResetPasswordPage> {
+  static const double _leftPadding = 350;
+  static const double _verticalSpacing = 24;
+
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmController = TextEditingController();
 
   bool _loading = true;
   bool _submitting = false;
+  bool _success = false;
+  String? _fatalError;
   String? _error;
 
   @override
-    void initState() {
-      super.initState();
-
-      Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-        if (data.event == AuthChangeEvent.passwordRecovery) {
-          setState(() => _loading = false);
-        }
-      });
-
-      _initRecovery();
-    }
-
+  void initState() {
+    super.initState();
+    _initRecovery();
+  }
 
   Future<void> _initRecovery() async {
-    final uri = Uri.base;
-    final code = uri.queryParameters['code'];
+    // With HashUrlStrategy the route lives inside the URL fragment:
+    //   /#/reset-password?code=abc123
+    // Uri.base.queryParameters is empty in that case; parse from the fragment instead.
+    final fragment = Uri.base.fragment;
+    final fragmentQuery = fragment.contains('?') ? fragment.split('?').last : '';
+    final code = Uri.splitQueryString(fragmentQuery)['code']
+        ?? Uri.base.queryParameters['code'];
 
     if (code == null) {
-      setState(() {
-        _error = 'Invalid or expired password reset link.';
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _fatalError = 'Invalid or expired password reset link.';
+          _loading = false;
+        });
+      }
       return;
     }
 
+    // Exchange the one-time code for an active session (PKCE flow).
+    // Without this, updateUser() has no session and throws "Auth session missing".
     try {
-      await Supabase.instance.client.auth.exchangeCodeForSession(code);
-      setState(() => _loading = false);
+      await supabase.auth.exchangeCodeForSession(code);
+      if (mounted) setState(() => _loading = false);
+    } on AuthException catch (e) {
+      if (mounted) setState(() { _fatalError = e.message; _loading = false; });
     } catch (_) {
-      setState(() {
-        _error = 'Invalid or expired password reset link.';
-        _loading = false;
-      });
+      if (mounted) setState(() { _fatalError = 'Invalid or expired password reset link.'; _loading = false; });
     }
   }
 
@@ -78,91 +87,173 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     });
 
     try {
-      await Supabase.instance.client.auth.updateUser(
+      await supabase.auth.updateUser(
         UserAttributes(password: password),
       );
 
-      await Supabase.instance.client.auth.signOut();
+      if (!mounted) return;
 
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/');
-      }
+      // Clear the recovery code from the URL before signing out so that
+      // AuthGate's Uri.base check no longer sees `code` on its next rebuild,
+      // and renders SignInPage instead of ResetPasswordPage.
+      html.window.history.replaceState(null, '', '/');
+      setState(() => _success = true);
+
+      await Future.delayed(const Duration(seconds: 2));
+
+      UserSession.instance.clear();
+      await supabase.auth.signOut();
+      // AuthGate rebuilds → no code in URL, no session → shows SignInPage.
+
     } on AuthException catch (e) {
-      setState(() => _error = e.message);
+      if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      setState(() => _error = 'Unexpected error occurred.');
+      if (mounted) setState(() => _error = 'Unexpected error occurred.');
     } finally {
-      setState(() => _submitting = false);
+      if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _confirmController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Set your password', style: BrandText.title),
-              const SizedBox(height: 24),
-
-              if (_loading)
-                const Text('Loading recovery session…')
-              else if (_error != null)
-                Text(
-                  _error!,
-                  style: const TextStyle(color: Colors.red),
-                )
-              else ...[
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'New password',
-                    border: OutlineInputBorder(),
-                  ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Container(
+              color: Colors.white,
+              child: Center(
+                child: Image.asset(
+                  'assets/images/login_background.png',
+                  fit: BoxFit.cover,
+                  alignment: Alignment.centerRight,
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _confirmController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Confirm password',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(_leftPadding, 0, 40, 0),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 500),
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 40),
+                          child: Text('Set your password', style: BrandText.title),
+                        ),
 
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: BrandColors.lightBlue,
-                    foregroundColor: Colors.white,
-                    textStyle: const TextStyle(
-                      inherit: false,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w500,
+                        const SizedBox(height: 40),
+
+                        if (_loading)
+                          const Text('Loading recovery session…')
+                        else if (_fatalError != null)
+                          Text(
+                            _fatalError!,
+                            style: const TextStyle(color: Colors.red),
+                          )
+                        else if (_success)
+                          const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Password reset successfully.',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'Redirecting you to login…',
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            ],
+                          )
+                        else ...[
+                          if (_error != null) ...[
+                            Text(
+                              _error!,
+                              style: const TextStyle(color: Colors.red),
+                            ),
+                            const SizedBox(height: _verticalSpacing),
+                          ],
+
+                          AutofillGroup(
+                            child: Column(
+                              children: [
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: TextField(
+                                    controller: _passwordController,
+                                    obscureText: true,
+                                    autofillHints: const [AutofillHints.newPassword],
+                                    onChanged: (_) {
+                                      if (_error != null) setState(() => _error = null);
+                                    },
+                                    decoration: const InputDecoration(
+                                      labelText: 'New password',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: _verticalSpacing),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: TextField(
+                                    controller: _confirmController,
+                                    obscureText: true,
+                                    autofillHints: const [AutofillHints.newPassword],
+                                    onChanged: (_) {
+                                      if (_error != null) setState(() => _error = null);
+                                    },
+                                    onSubmitted: (_) => _submit(),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Confirm password',
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: _verticalSpacing),
+
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: BrandColors.lightBlue,
+                                foregroundColor: Colors.white,
+                              ),
+                              onPressed: _submitting ? null : _submit,
+                              child: _submitting
+                                  ? const CircularProgressIndicator()
+                                  : const Text('Set password'),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : const Text('Set password'),
                 ),
-              ],
-            ],
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

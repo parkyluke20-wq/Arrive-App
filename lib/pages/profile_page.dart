@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/supabase_service.dart';
+import '../services/user_session.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import '../layouts/app_scaffold.dart';
 import '../theme/brand_colors.dart';
@@ -42,7 +44,6 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  final supabase = Supabase.instance.client;
   final ScrollController _scrollController = ScrollController();
   InputDecoration _denseDecoration(String label) => const InputDecoration(
       isDense: true,
@@ -86,16 +87,15 @@ class _ProfilePageState extends State<ProfilePage> {
       currentUserId = session.user.id;
       currentUserEmail = session.user.email ?? '';
 
-      final roles = await supabase
+      final roleStr = await UserSession.instance.getRole();
+      effectiveRole = _resolveRole(roleStr);
+
+      final scopeRows = await withRetry(() => supabase
           .from('user_roles')
-          .select('role, scope_type, scope_type_id')
-          .eq('user_id', currentUserId);
+          .select('scope_type, scope_type_id')
+          .eq('user_id', currentUserId));
 
-      if (roles.isEmpty) throw Exception('No roles assigned');
-
-      effectiveRole = _resolveRole(roles.first['role']);
-
-      customers = await _loadCustomersForRole(roles);
+      customers = await _loadCustomersForRole(scopeRows);
       customers.sort(
         (a, b) => a['customer_name'].compareTo(b['customer_name']),
       );
@@ -105,9 +105,9 @@ class _ProfilePageState extends State<ProfilePage> {
         await _loadMembers();
       }
 
-      setState(() => loading = false);
+      if (mounted) setState(() => loading = false);
     } catch (e) {
-      setState(() {
+      if (mounted) setState(() {
         error = e.toString();
         loading = false;
       });
@@ -155,19 +155,19 @@ class _ProfilePageState extends State<ProfilePage> {
     }
 
     if (isGlobal) {
-      return await supabase
+      return await withRetry(() => supabase
           .from('customers')
           .select('customer_id, customer_name')
           .eq('active', true)
-          .order('customer_name');
+          .order('customer_name'));
     }
 
     // 🔹 SITE-SCOPED USERS
     if (siteIds.isNotEmpty) {
-      final cs = await supabase
+      final cs = await withRetry(() => supabase
           .from('customer_sites')
           .select('customer_id')
-          .inFilter('site_id', siteIds.toList());
+          .inFilter('site_id', siteIds.toList()));
 
       customerIds.addAll(
         cs.map((r) => r['customer_id'] as int),
@@ -176,12 +176,12 @@ class _ProfilePageState extends State<ProfilePage> {
 
     if (customerIds.isEmpty) return [];
 
-    return await supabase
+    return await withRetry(() => supabase
         .from('customers')
         .select('customer_id, customer_name')
         .inFilter('customer_id', customerIds.toList())
         .eq('active', true)
-        .order('customer_name');
+        .order('customer_name'));
   }
 
   // ---------------------------------------------------------------------------
@@ -192,11 +192,11 @@ class _ProfilePageState extends State<ProfilePage> {
     final customerId = selectedCustomerId;
     if (customerId == null) return;
 
-    final roleRows = await supabase
+    final roleRows = await withRetry(() => supabase
         .from('user_roles')
         .select('user_id, role')
         .eq('scope_type', 'customer')
-        .eq('scope_type_id', customerId);
+        .eq('scope_type_id', customerId));
 
     if (roleRows.isEmpty) {
       setState(() => members = []);
@@ -206,10 +206,10 @@ class _ProfilePageState extends State<ProfilePage> {
     final userIds =
         roleRows.map((r) => r['user_id'] as String).toList();
 
-    final userRows = await supabase
+    final userRows = await withRetry(() => supabase
         .from('users')
         .select('user_id, email')
-        .inFilter('user_id', userIds);
+        .inFilter('user_id', userIds));
 
     final rows = userRows.map((u) {
       final roleRow =
@@ -227,7 +227,7 @@ class _ProfilePageState extends State<ProfilePage> {
       return a['email'].compareTo(b['email']);
     });
 
-    setState(() => members = rows);
+    if (mounted) setState(() => members = rows);
   }
 
   // ---------------------------------------------------------------------------
@@ -238,6 +238,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Remove user'),
         content: const Text(
           'Are you sure you want to remove this user?\n'
@@ -259,38 +260,43 @@ class _ProfilePageState extends State<ProfilePage> {
 
     if (confirm != true) return;
 
-    final deactivateRes = await supabase
-        .from('users')
-        .update({'active': false})
-        .eq('user_id', member['user_id'])
-        .select();
+    try {
+      final deactivateRes = await supabase
+          .from('users')
+          .update({'active': false})
+          .eq('user_id', member['user_id'])
+          .select();
 
-    if (deactivateRes.isEmpty) {
-      _snack('Failed to deactivate user');
-      return;
+      if (deactivateRes.isEmpty) {
+        _snack('Failed to deactivate user');
+        return;
+      }
+
+      final deleteRes = await supabase
+          .from('user_roles')
+          .delete()
+          .eq('user_id', member['user_id'])
+          .eq('scope_type', 'customer')
+          .eq('scope_type_id', selectedCustomerId!)
+          .select();
+
+      if (deleteRes.isEmpty) {
+        _snack('User deactivated, but role removal failed');
+        return;
+      }
+
+      await _loadMembers();
+      _snack('User removed');
+    } catch (e) {
+      _snack("Couldn't remove user — please try again");
     }
-
-    final deleteRes = await supabase
-        .from('user_roles')
-        .delete()
-        .eq('user_id', member['user_id'])
-        .eq('scope_type', 'customer')
-        .eq('scope_type_id', selectedCustomerId!)
-        .select();
-
-    if (deleteRes.isEmpty) {
-      _snack('User deactivated, but role removal failed');
-      return;
-    }
-
-    await _loadMembers();
-    _snack('User removed');
   }
 
   Future<void> _upgradeToAdmin(Map<String, dynamic> member) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Upgrade to admin'),
         content: const Text(
           'Are you sure you want to upgrade this user to Customer Admin?',
@@ -311,21 +317,25 @@ class _ProfilePageState extends State<ProfilePage> {
 
     if (confirm != true) return;
 
-    final res = await supabase
-        .from('user_roles')
-        .update({'role': 'customer_admin'})
-        .eq('user_id', member['user_id'])
-        .eq('scope_type', 'customer')
-        .eq('scope_type_id', selectedCustomerId!)
-        .select();
+    try {
+      final res = await supabase
+          .from('user_roles')
+          .update({'role': 'customer_admin'})
+          .eq('user_id', member['user_id'])
+          .eq('scope_type', 'customer')
+          .eq('scope_type_id', selectedCustomerId!)
+          .select();
 
-    if (res.isEmpty) {
-      _snack('Upgrade failed (permission denied)');
-      return;
+      if (res.isEmpty) {
+        _snack('Upgrade failed (permission denied)');
+        return;
+      }
+
+      await _loadMembers();
+      _snack('User upgraded to admin');
+    } catch (e) {
+      _snack("Couldn't upgrade user — please try again");
     }
-
-    await _loadMembers();
-    _snack('User upgraded to admin');
   }
 
   Widget _memberRow(Map<String, dynamic> member) {
@@ -386,8 +396,8 @@ class _ProfilePageState extends State<ProfilePage> {
     final newPassword = newPasswordController.text;
     final confirmPassword = confirmPasswordController.text;
 
-    if (newPassword.length < 6) {
-      _snack('Password must be at least 6 characters');
+    if (newPassword.length < 8) {
+      _snack('Password must be at least 8 characters');
       return;
     }
 
@@ -414,7 +424,7 @@ class _ProfilePageState extends State<ProfilePage> {
       _snack('Password updated');
     } catch (e) {
       setState(() => updatingPassword = false);
-      _snack(e.toString());
+      _snack("Couldn't update password — please try again");
     }
   }
 
@@ -500,7 +510,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     obscureText: true,
                     decoration: const InputDecoration(
                       labelText: 'New Password',
-                      helperText: 'Minimum 6 characters',
+                      helperText: 'Minimum 8 characters',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -550,6 +560,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         .toList(),
                     dropdownStyleData: const DropdownStyleData(
                       maxHeight: 260,
+                      decoration: BoxDecoration(color: BrandColors.background),
                     ),
                     menuItemStyleData: const MenuItemStyleData(
                       height: 32,
@@ -600,6 +611,8 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void dispose() {
     _scrollController.dispose();
+    newPasswordController.dispose();
+    confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -634,6 +647,13 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
 
     _loadSites();
   }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    emailController.dispose();
+    super.dispose();
+  }
   List<Map<String, dynamic>> sites = [];
   final nameController = TextEditingController();
   final emailController = TextEditingController();
@@ -661,16 +681,26 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
   bool submitting = false;
 
   Future<void> _loadSites() async {
-    final res = await Supabase.instance.client
-        .from('sites')
-        .select('site_id, site_name');
+    try {
+      final res = await supabase
+          .from('sites')
+          .select('site_id, site_name')
+          .order('site_name');
 
-    sites = List<Map<String, dynamic>>.from(res);
+      if (!mounted) return;
+      setState(() {
+        sites = List<Map<String, dynamic>>.from(res);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      _snack("Couldn't load sites — please try again");
+    }
   }
 
   @override
     Widget build(BuildContext context) {
       return AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Create User'),
         content: SizedBox(
           width: 400,
@@ -704,6 +734,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                 ],
                 dropdownStyleData: const DropdownStyleData(
                   maxHeight: 260,
+                  decoration: BoxDecoration(color: BrandColors.background),
                 ),
                 menuItemStyleData: const MenuItemStyleData(
                   height: 32,
@@ -735,6 +766,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                       .toList(),
                   dropdownStyleData: const DropdownStyleData(
                     maxHeight: 260,
+                    decoration: BoxDecoration(color: BrandColors.background),
                   ),
                   menuItemStyleData: const MenuItemStyleData(
                     height: 32,
@@ -764,6 +796,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                       .toList(),
                   dropdownStyleData: const DropdownStyleData(
                     maxHeight: 260,
+                    decoration: BoxDecoration(color: BrandColors.background),
                   ),
                   menuItemStyleData: const MenuItemStyleData(
                     height: 32,
@@ -823,24 +856,28 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
           break;
       }
 
-      final csv =
-      'email,name,role,scope_type,scope_id\n'
-      '$email,$name,$role,$scopeType,$scopeId';
+      String q(String v) => '"${v.replaceAll('"', '""')}"';
 
-      print('CREATE USER: calling function...');
+      final csv =
+          'email,name,role,scope_type,scope_id\n'
+          '${q(email)},${q(name)},${q(role)},${q(scopeType)},${q(scopeId.toString())}';
+
+      final session = supabase.auth.currentSession;
+      if (session == null) {
+        setState(() => submitting = false);
+        _snack('Not authenticated. Please sign in and try again.');
+        return;
+      }
 
       try {
         final response = await http.post(
           Uri.parse('https://eozwxanmzamutjztoxbo.supabase.co/functions/v1/bulk_create_users_from_app'),
           headers: {
-            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvend4YW5temFtdXRqenRveGJvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTYwODU4MCwiZXhwIjoyMDg1MTg0NTgwfQ.O0UlhIQSDK3jYMbZESITa6ThNeWH6ICf17SoJnb1l5w',
+            'Authorization': 'Bearer ${session.accessToken}',
             'Content-Type': 'text/csv',
           },
           body: csv,
         );
-
-        print('STATUS: ${response.statusCode}');
-        print('BODY: ${response.body}');
 
         if (response.statusCode != 200) {
           setState(() => submitting = false);
@@ -860,7 +897,6 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
         });
 
       } catch (e) {
-        print('CREATE USER ERROR: $e');
         setState(() => submitting = false);
         _snack('Error: $e');
       }
@@ -924,6 +960,7 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
+          backgroundColor: BrandColors.background,
           title: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [

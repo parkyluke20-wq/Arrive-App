@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../pages/sign_in_page.dart';
+import '../services/supabase_service.dart';
 import '../pages/inbound_overview_page.dart';
 import '../pages/reset_password_page.dart';
 
@@ -10,8 +11,6 @@ class AuthGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final supabase = Supabase.instance.client;
-
     return StreamBuilder<AuthState>(
       stream: supabase.auth.onAuthStateChange,
       builder: (context, snapshot) {
@@ -21,10 +20,10 @@ class AuthGate extends StatelessWidget {
           );
         }
 
-        final routeName = ModalRoute.of(context)?.settings.name;
+        final uri = Uri.base;
+        final hasRecoveryCode = uri.queryParameters.containsKey('code');
 
-        // Explicit bypass for password recovery
-        if (routeName == '/reset-password') {
+        if (hasRecoveryCode) {
           return const ResetPasswordPage();
         }
 

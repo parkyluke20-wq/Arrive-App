@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_picker/file_picker.dart';
 
+import '../constants/app_constants.dart';
 import '../controllers/booking_controller.dart';
 
 class BookingService {
@@ -78,7 +79,7 @@ class BookingService {
     if (controller.selectedStartTime == null) return;
 
     final start = controller.selectedStartTime!;
-    final end = start.add(Duration(minutes: slotUnitsRequired * 30));
+    final end = start.add(Duration(minutes: slotUnitsRequired * AppConstants.slotDurationMinutes));
 
     final basePayload = _bookingPayload(
       controller: controller,
@@ -135,13 +136,13 @@ class BookingService {
     }
 
     final start = controller.selectedStartTime!;
-    final end = start.add(Duration(minutes: slotUnitsRequired * 30));
+    final end = start.add(Duration(minutes: slotUnitsRequired * AppConstants.slotDurationMinutes));
 
     // ----------------------------------------------------
     // 🔒 24 HOUR BUSINESS RULE ENFORCEMENT
     // ----------------------------------------------------
     final now = DateTime.now();
-    final minimumAllowed = now.add(const Duration(hours: 24));
+    final minimumAllowed = now.add(AppConstants.minAdvanceBooking);
 
     if (start.isBefore(minimumAllowed)) {
       throw Exception(
@@ -195,7 +196,7 @@ class BookingService {
         final insert = await supabase
             .from('bookings')
             .insert(insertPayload)
-            .select('booking_id, booking_ref') // ADD booking_ref
+            .select('booking_id, booking_ref')
             .single();
 
         resolvedBookingId = insert['booking_id'].toString();

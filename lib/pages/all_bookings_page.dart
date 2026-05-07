@@ -1,13 +1,17 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
 import 'dart:convert';
+// Intentionally web-only: dart:html is used for CSV blob download and packing list anchor clicks.
 import 'dart:html' as html;
 import '../layouts/app_scaffold.dart';
+import '../services/user_session.dart';
 import '../theme/brand_colors.dart';
 import 'package:csv/csv.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import '../pages/booking_form_page.dart';
+import '../services/supabase_service.dart';
 
 class AllBookingsPage extends StatefulWidget {
   const AllBookingsPage({super.key});
@@ -17,24 +21,34 @@ class AllBookingsPage extends StatefulWidget {
 }
 
 class _AllBookingsPageState extends State<AllBookingsPage> {
-  final supabase = Supabase.instance.client;
   final ScrollController _horizontalController = ScrollController();
   bool _loading = true;
+  String? _error;
   List<Map<String, dynamic>> _bookings = [];
   List<Map<String, dynamic>> _allBookings = [];
   final TextEditingController _referenceSearchController = TextEditingController();
   String _referenceSearch = '';
+  Timer? _referenceSearchDebounce;
   List<String> _statusFilter = ['all'];
   List<String> _customerFilter = ['all'];
   List<String> _customerOptions = ['all'];
-  DateTime? _fromDate;
+  DateTime _fromDate = _defaultFromDate();
   DateTime? _toDate;
+
+  static DateTime _defaultFromDate() {
+    final today = DateTime.now();
+    return DateTime(today.year, today.month, today.day)
+        .subtract(const Duration(days: 14));
+  }
+  final _filterNotifier = ValueNotifier<int>(0);
   String? _sortColumn;
   bool _sortAscending = true;
   String? _effectiveRole;
   String _formatStatus(String? status) {
     if (status == null) return '—';
     switch (status) {
+      case 'all':
+        return 'All';
       case 'draft':
         return 'Draft';
       case 'booked':
@@ -57,8 +71,10 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
   @override
   void dispose() {
+    _referenceSearchDebounce?.cancel();
     _horizontalController.dispose();
     _referenceSearchController.dispose();
+    _filterNotifier.dispose();
     super.dispose();
   }
 
@@ -67,74 +83,82 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
     setState(() {
       _loading = true;
+      _error = null;
     });
 
-    var query = supabase
-      .from('bookings')
-      .select(
-        'booking_id,booking_ref,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name),qty_cases,qty_pallets',
-      );
+    try {
+      var query = supabase
+        .from('bookings')
+        .select(
+          'booking_id,booking_ref,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name),qty_cases,qty_pallets',
+        );
 
-  if (!_statusFilter.contains('all')) {
-    query = query.inFilter('status', _statusFilter);
-  }
-
-  if (!_customerFilter.contains('all')) {
-    query = query.inFilter(
-        'customers.customer_code', _customerFilter);
-  }
-
-  if (_fromDate != null) {
-    query = query.gte('start_time', _fromDate!.toIso8601String());
-  }
-
-  if (_toDate != null) {
-    final endOfDay = DateTime(
-      _toDate!.year,
-      _toDate!.month,
-      _toDate!.day,
-      23,
-      59,
-      59,
-    );
-    query = query.lte('start_time', endOfDay.toIso8601String());
-  }
-
-  final response = await query.order('start_time', ascending: false);
-
-    if (!mounted) return;
-
-    final bookings = List<Map<String, dynamic>>.from(response);
-
-    final customersInBookings = bookings
-        .map((b) => b['customers']?['customer_code'] as String?)
-        .where((c) => c != null && c.isNotEmpty)
-        .cast<String>()
-        .toSet()
-        .toList()
-      ..sort();
-
-    setState(() {
-      _allBookings = bookings;
-      _applyReferenceSearch();
-      if (customersInBookings.length == 1) {
-        // Only one customer available → hard lock to it
-        _customerOptions = customersInBookings;
-        _customerFilter = [customersInBookings.first];
-      } else {
-        _customerOptions = ['all', ...customersInBookings];
-
-        if (!_customerFilter.every((c) => _customerOptions.contains(c))) {
-          _customerFilter = ['all'];
-        }
+      if (!_statusFilter.contains('all')) {
+        query = query.inFilter('status', _statusFilter);
       }
 
-      _loading = false;
-    });
+      if (!_customerFilter.contains('all')) {
+        query = query.inFilter(
+            'customers.customer_code', _customerFilter);
+      }
+
+      query = query.gte('start_time', _fromDate.toIso8601String());
+
+      if (_toDate != null) {
+        final endOfDay = DateTime(
+          _toDate!.year,
+          _toDate!.month,
+          _toDate!.day,
+          23,
+          59,
+          59,
+        );
+        query = query.lte('start_time', endOfDay.toIso8601String());
+      }
+
+      final response = await withRetry(() => query.order('start_time', ascending: false));
+
+      if (!mounted) return;
+
+      final bookings = List<Map<String, dynamic>>.from(response);
+
+      final customersInBookings = bookings
+          .map((b) => b['customers']?['customer_code'] as String?)
+          .where((c) => c != null && c.isNotEmpty)
+          .cast<String>()
+          .toSet()
+          .toList()
+        ..sort();
+
+      setState(() {
+        _allBookings = bookings;
+        _applyReferenceSearch();
+        if (customersInBookings.length == 1) {
+          // Only one customer available → hard lock to it
+          _customerOptions = customersInBookings;
+          _customerFilter = [customersInBookings.first];
+        } else {
+          _customerOptions = ['all', ...customersInBookings];
+
+          if (!_customerFilter.every((c) => _customerOptions.contains(c))) {
+            _customerFilter = ['all'];
+          }
+        }
+
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't load bookings — please try again")),
+      );
+    }
   }
 
   void _exportToCsv() {
     if (_bookings.isEmpty) return;
+    if (!kIsWeb) return;
 
     final List<List<String>> rows = [];
 
@@ -145,6 +169,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       'Type',
       'Date',
       'Time',
+      'Booking Ref',
       'Reference',
       'Status',
       'Pallets',
@@ -164,11 +189,12 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
         booking['vehicle_types']?['name'] ?? '',
         dateFmt.format(startTime),
         timeFmt.format(startTime),
+        (booking['booking_ref'] ?? '').toString(),
         booking['reference'] ?? '',
+        _formatStatus(booking['status']),
         booking['qty_pallets'] ?? '',
         booking['qty_cases'] ?? '',
-        _formatStatus(booking['status']),
-      ]); 
+      ]);
     }
 
     final csv = ListToCsvConverter().convert(rows);
@@ -275,12 +301,25 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     _applySorting();
   }
 
+  ThemeData _datePickerTheme(BuildContext context) {
+    return Theme.of(context).copyWith(
+      colorScheme: Theme.of(context).colorScheme.copyWith(
+        surface: BrandColors.background,
+        surfaceContainerHigh: BrandColors.background,
+      ),
+    );
+  }
+
   Future<void> _pickFromDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: _fromDate ?? DateTime.now(),
+      initialDate: _fromDate,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
+      builder: (context, child) => Theme(
+        data: _datePickerTheme(context),
+        child: child!,
+      ),
     );
 
     if (picked != null) {
@@ -295,6 +334,10 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       initialDate: _toDate ?? DateTime.now(),
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
+      builder: (context, child) => Theme(
+        data: _datePickerTheme(context),
+        child: child!,
+      ),
     );
 
     if (picked != null) {
@@ -398,6 +441,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
   Future<void> _downloadPackingList(String? path) async {
     if (path == null || path.isEmpty) return;
+    if (!kIsWeb) return;
 
     try {
       final signedUrl = await supabase.storage
@@ -419,26 +463,23 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   }
 
   Future<void> _loadUserRole() async {
-    final session = supabase.auth.currentSession;
-    if (session == null) return;
+    if (supabase.auth.currentSession == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
 
-    final userId = session.user.id;
+    try {
+      final role = await UserSession.instance.getRole();
 
-    final roles = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId);
+      if (mounted) setState(() {
+        _effectiveRole = role;
+      });
 
-    if (roles.isEmpty) return;
-
-    // Your system resolves by first role (same as ProfilePage)
-    final role = roles.first['role'] as String;
-
-    setState(() {
-      _effectiveRole = role;
-    });
-
-    await _loadBookings();
+      await _loadBookings();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _loading = false; _error = "Couldn't load bookings — please try again"; });
+    }
   }
 
   bool get _canUpdateStatus =>
@@ -470,6 +511,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
+          backgroundColor: BrandColors.background,
           title: const Text('Update Booking Status'),
           content: StatefulBuilder(
             builder: (context, setLocalState) {
@@ -556,20 +598,27 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                   );
                 }
 
-                await supabase
-                    .from('bookings')
-                    .update({
-                      'status': selectedStatus,
-                      'arrived_at':
-                          arrivedAt?.toIso8601String(),
-                    })
-                    .eq('booking_id',
-                        booking['booking_id']);
+                try {
+                  await supabase
+                      .from('bookings')
+                      .update({
+                        'status': selectedStatus,
+                        'arrived_at':
+                            arrivedAt?.toIso8601String(),
+                      })
+                      .eq('booking_id',
+                          booking['booking_id']);
 
-                if (!mounted) return;
+                  if (!mounted) return;
 
-                Navigator.pop(context);
-                await _loadBookings();
+                  Navigator.pop(context);
+                  await _loadBookings();
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Couldn't update booking status — please try again")),
+                  );
+                }
               },
               child: const Text('Save'),
             ),
@@ -590,6 +639,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Cancel Booking'),
         content: const Text('Are you sure you want to cancel this booking?'),
         actions: [
@@ -601,15 +651,22 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
             onPressed: () async {
               Navigator.pop(context);
 
-              await supabase
-                  .from('bookings')
-                  .update({
-                    'status': 'cancelled',
-                    'updated_at': DateTime.now().toIso8601String(),
-                  })
-                  .eq('booking_id', bookingId);
+              try {
+                await supabase
+                    .from('bookings')
+                    .update({
+                      'status': 'cancelled',
+                      'updated_at': DateTime.now().toIso8601String(),
+                    })
+                    .eq('booking_id', bookingId);
 
-              await _loadBookings();
+                await _loadBookings();
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Couldn't cancel booking — please try again")),
+                );
+              }
             },
             child: const Text('Yes'),
           ),
@@ -683,6 +740,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                   ),
                   dropdownStyleData: const DropdownStyleData(
                     maxHeight: 300,
+                    decoration: BoxDecoration(color: BrandColors.background),
                   ),
                   menuItemStyleData: const MenuItemStyleData(
                     height: 32,
@@ -693,43 +751,46 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                       enabled: false,
                       child: StatefulBuilder(
                         builder: (context, menuSetState) {
-                          final isSelected =
-                              _statusFilter.contains(status);
-
-                          return InkWell(
-                            onTap: () {
-                              if (status == 'all') {
-                                setState(() {
-                                  _statusFilter = ['all'];
-                                });
-                              } else {
-                                setState(() {
-                                  _statusFilter.remove('all');
-
-                                  if (isSelected) {
-                                    _statusFilter.remove(status);
+                          return ValueListenableBuilder<int>(
+                            valueListenable: _filterNotifier,
+                            builder: (context, _, __) {
+                              final isSelected = _statusFilter.contains(status);
+                              return InkWell(
+                                onTap: () {
+                                  if (status == 'all') {
+                                    setState(() {
+                                      _statusFilter = ['all'];
+                                    });
                                   } else {
-                                    _statusFilter.add(status);
+                                    setState(() {
+                                      _statusFilter.remove('all');
+                                      if (isSelected) {
+                                        _statusFilter.remove(status);
+                                      } else {
+                                        _statusFilter.add(status);
+                                      }
+                                      if (_statusFilter.isEmpty) {
+                                        _statusFilter = ['all'];
+                                      }
+                                    });
                                   }
-
-                                  if (_statusFilter.isEmpty) {
-                                    _statusFilter = ['all'];
-                                  }
-                                });
-                              }
-
-                              _loadBookings();
-                              menuSetState(() {});
-                            },
-                            child: Row(
-                              children: [
-                                Checkbox(
-                                  value: isSelected,
-                                  onChanged: (_) {},
+                                  _filterNotifier.value++;
+                                  _loadBookings();
+                                  menuSetState(() {});
+                                },
+                                child: Row(
+                                  children: [
+                                    IgnorePointer(
+                                      child: Checkbox(
+                                        value: isSelected,
+                                        onChanged: (_) {},
+                                      ),
+                                    ),
+                                    Text(_formatStatus(status)),
+                                  ],
                                 ),
-                                Text(_formatStatus(status)),
-                              ],
-                            ),
+                              );
+                            },
                           );
                         },
                       ),
@@ -767,6 +828,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                   ),
                   dropdownStyleData: const DropdownStyleData(
                     maxHeight: 300,
+                    decoration: BoxDecoration(color: BrandColors.background),
                   ),
                   menuItemStyleData: const MenuItemStyleData(
                     height: 32,
@@ -777,50 +839,51 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                       enabled: false,
                       child: StatefulBuilder(
                         builder: (context, menuSetState) {
-                          final isSelected =
-                              _customerFilter.contains(customer);
-
-                          return InkWell(
-                            onTap: () {
-                              if (customer == 'all') {
-                                setState(() {
-                                  _customerFilter = ['all'];
-                                });
-                              } else {
-                                setState(() {
-                                  _customerFilter.remove('all');
-
-                                  if (isSelected) {
-                                    _customerFilter.remove(customer);
+                          return ValueListenableBuilder<int>(
+                            valueListenable: _filterNotifier,
+                            builder: (context, _, __) {
+                              final isSelected = _customerFilter.contains(customer);
+                              return InkWell(
+                                onTap: () {
+                                  if (customer == 'all') {
+                                    setState(() {
+                                      _customerFilter = ['all'];
+                                    });
                                   } else {
-                                    _customerFilter.add(customer);
+                                    setState(() {
+                                      _customerFilter.remove('all');
+                                      if (isSelected) {
+                                        _customerFilter.remove(customer);
+                                      } else {
+                                        _customerFilter.add(customer);
+                                      }
+                                      if (_customerFilter.isEmpty) {
+                                        _customerFilter = ['all'];
+                                      }
+                                    });
                                   }
-
-                                  if (_customerFilter.isEmpty) {
-                                    _customerFilter = ['all'];
-                                  }
-                                });
-                              }
-
-                              _loadBookings();
-                              menuSetState(() {});
+                                  _filterNotifier.value++;
+                                  _loadBookings();
+                                  menuSetState(() {});
+                                },
+                                child: Row(
+                                  children: [
+                                    IgnorePointer(
+                                      child: Checkbox(
+                                        value: isSelected,
+                                        onChanged: (_) {},
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        customer == 'all' ? 'All' : customer,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
                             },
-                            child: Row(
-                              children: [
-                                Checkbox(
-                                  value: isSelected,
-                                  onChanged: (_) {},
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    customer == 'all'
-                                        ? 'All'
-                                        : customer,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
                           );
                         },
                       ),
@@ -837,11 +900,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
             // ───────── DATE FROM ─────────
             OutlinedButton(
               onPressed: _pickFromDate,
-              child: Text(
-                _fromDate == null
-                    ? 'Date From:'
-                    : 'Date From: ${dateFmt.format(_fromDate!)}',
-              ),
+              child: Text('Date From: ${dateFmt.format(_fromDate)}'),
             ),
 
             const SizedBox(width: 16),
@@ -883,19 +942,25 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                   border: OutlineInputBorder(),
                 ),
                 onChanged: (value) {
-                  setState(() {
-                    _referenceSearch = value;
-                    _applyReferenceSearch();
-                  });
+                  _referenceSearchDebounce?.cancel();
+                  _referenceSearchDebounce = Timer(
+                    const Duration(milliseconds: 300),
+                    () {
+                      setState(() {
+                        _referenceSearch = value;
+                        _applyReferenceSearch();
+                      });
+                    },
+                  );
                 },
               ),
             ),
 
-                      ],
-                    ),
-                  ],
-                );
-              }
+          ],
+        ),
+      ],
+    );
+  }
 
   Widget _buildBookingsTable() {
     final dateFmt = DateFormat('dd/MM/yyyy');
@@ -972,9 +1037,66 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       );
     }
 
+    Widget linkCell(String? text, String? bookingId, double width) {
+      final label = (text ?? '—').toString();
+      return SizedBox(
+        width: width,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: bookingId != null && text != null
+              ? MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () => _openViewBooking(bookingId),
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF1558D6),
+                        decoration: TextDecoration.underline,
+                        decorationColor: Color(0xFF1558D6),
+                      ),
+                    ),
+                  ),
+                )
+              : Text(label, overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+
+    Widget statusCell(String? status, double width) {
+      final text = _formatStatus(status);
+      Color? bgColor;
+      if (status == 'received') bgColor = BrandColors.green;
+      if (status == 'cancelled') bgColor = BrandColors.red;
+      if (status == 'booked') bgColor = BrandColors.orange;
+
+      return SizedBox(
+        width: width,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: bgColor == null
+              ? Text(text, overflow: TextOverflow.ellipsis)
+              : Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(text, overflow: TextOverflow.ellipsis),
+                ),
+        ),
+      );
+    }
+
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
+
+    if (_error != null) {
+      return Center(child: Text(_error!));
+    }
+
     return Scrollbar(
       controller: _horizontalController,
       thumbVisibility: true,
@@ -1113,16 +1235,15 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                 ],
                               ),
                             ),
-                            dataCell(
-                              (booking['booking_ref'] ?? '').toString(),
+                            linkCell(
+                              booking['booking_ref']?.toString(),
+                              booking['booking_id']?.toString(),
                               bookingRefW,
                             ),
                             dataCell(
-                                booking['reference'] ?? '',
+                                booking['reference'] ?? '—',
                                 refW),
-                            dataCell(
-                                _formatStatus(booking['status']),
-                                statusW),
+                            statusCell(booking['status'], statusW),
                             dataCell(
                                 booking['sites']?['site_name'] ?? '—',
                                 siteW),

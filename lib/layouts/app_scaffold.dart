@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/supabase_service.dart';
+import '../services/user_session.dart';
 import '../theme/brand_colors.dart';
 import '../pages/booking_form_page.dart';
 
@@ -32,25 +33,23 @@ class _AppScaffoldState extends State<AppScaffold> {
   }
 
   Future<void> _loadRole() async {
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) return;
-
-    final roles = await Supabase.instance.client
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', session.user.id);
-
-    if (roles.isNotEmpty) {
-      _effectiveRole = roles.first['role'];
+    if (supabase.auth.currentSession == null) {
+      if (mounted) setState(() => _loadingRole = false);
+      return;
     }
 
-    if (mounted) {
-      setState(() => _loadingRole = false);
+    try {
+      _effectiveRole = await UserSession.instance.getRole();
+    } catch (_) {
+      // _effectiveRole stays null; role-gated nav items won't show
+    } finally {
+      if (mounted) setState(() => _loadingRole = false);
     }
   }
 
   Future<void> _logout(BuildContext context) async {
-    await Supabase.instance.client.auth.signOut();
+    UserSession.instance.clear();
+    await supabase.auth.signOut();
 
     Navigator.of(context).pushNamedAndRemoveUntil(
       '/',

@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:intl/intl.dart';
 import '../layouts/app_scaffold.dart';
 import '../theme/brand_colors.dart';
 import '../controllers/booking_controller.dart';
 import '../services/booking_service.dart';
+import '../services/supabase_service.dart';
+import '../widgets/packing_list_widget.dart';
+import '../widgets/booking_activity_panel.dart';
 
 // ---------------- MODELS ----------------
 
@@ -59,8 +61,6 @@ class _BookingFormPageState extends State<BookingFormPage> {
   bool get isView => mode == BookingFormMode.view;
   bool get isEdit => mode == BookingFormMode.edit;
   bool get isCreate => mode == BookingFormMode.create;
-  final SupabaseClient supabase = Supabase.instance.client;
-
   late final BookingController bookingController;
   late final BookingService bookingService;
 
@@ -71,15 +71,18 @@ class _BookingFormPageState extends State<BookingFormPage> {
   final containerController = TextEditingController();
   final qtyPalletsController = TextEditingController();
   final dateController = TextEditingController();
+  final _commentController = TextEditingController();
 
   PlatformFile? packingListFile;
   String? existingPackingListPath;
   bool packingListRemoved = false;
+  Key _packingListKey = UniqueKey();
   String? editingBookingId;
+  String? _bookingRef;
   bool _didLoadRouteArgs = false;
   bool loading = true;
-  Future<List<Map<String, dynamic>>>? _eventsFuture;
   String? bookingStatus;
+  final _activityPanelKey = GlobalKey<BookingActivityPanelState>();
 
   // ---- reference data ----
   List<CustomerOption> customers = [];
@@ -157,73 +160,77 @@ class _BookingFormPageState extends State<BookingFormPage> {
     ]);
 
     if (editingBookingId != null) {
-      final row = await supabase
-          .from('bookings')
-          .select(
-            'booking_id, customer_id, site_id, vehicle_type_id, '
-            'start_time, end_time, reference, carrier, vehicle_reg, '
-            'container_number, qty_pallets, qty_cases, booking_date, '
-            'status, packing_list_path'
-          )
-          
-          .eq('booking_id', editingBookingId!)
-          .single();
+      try {
+        final row = await supabase
+            .from('bookings')
+            .select(
+              'booking_id, booking_ref, customer_id, site_id, vehicle_type_id, '
+              'start_time, end_time, reference, carrier, vehicle_reg, '
+              'container_number, qty_pallets, qty_cases, booking_date, '
+              'status, packing_list_path'
+            )
 
-      // ---- restore packing list state ----
-      existingPackingListPath = row['packing_list_path'];
-      packingListRemoved = false;
-      packingListFile = null;
-      bookingStatus = row['status'];
+            .eq('booking_id', editingBookingId!)
+            .single();
 
-      // ---- restore site list first ----
-      await _loadSitesForCustomer(row['customer_id']);
+        // ---- restore packing list state ----
+        existingPackingListPath = row['packing_list_path'];
+        packingListRemoved = false;
+        packingListFile = null;
+        bookingStatus = row['status'];
+        _bookingRef = row['booking_ref']?.toString();
 
-      // ---- restore controller state ----
-      bookingController.selectedCustomer = row['customer_id'];
-      bookingController.selectedSite = row['site_id'];
+        // ---- restore site list first ----
+        await _loadSitesForCustomer(row['customer_id']);
 
-      bookingController.selectedVehicleType = vehicleTypes.firstWhere(
-        (v) => v.vehicleTypeId == row['vehicle_type_id'],
-      );
+        // ---- restore controller state ----
+        bookingController.selectedCustomer = row['customer_id'];
+        bookingController.selectedSite = row['site_id'];
 
-      final DateTime storedStart =
-          DateTime.parse(row['start_time']);
+        bookingController.selectedVehicleType = vehicleTypes.firstWhere(
+          (v) => v.vehicleTypeId == row['vehicle_type_id'],
+        );
 
-      final DateTime restoredDate = DateTime(
-        storedStart.year,
-        storedStart.month,
-        storedStart.day,
-      );
+        final DateTime storedStart =
+            DateTime.parse(row['start_time']);
 
-      bookingController.selectedDate = restoredDate;
+        final DateTime restoredDate = DateTime(
+          storedStart.year,
+          storedStart.month,
+          storedStart.day,
+        );
 
-      bookingController.availableStartTimes
-        ..clear()
-        ..add(storedStart);
+        bookingController.selectedDate = restoredDate;
 
-      bookingController.selectedStartTime = storedStart;
+        bookingController.availableStartTimes
+          ..clear()
+          ..add(storedStart);
 
-      bookingController.notifyListeners();
+        bookingController.selectedStartTime = storedStart;
 
-      // ---- restore text fields ----
-      referenceController.text = row['reference'] ?? '';
-      carrierController.text = row['carrier'] ?? '';
-      vehicleRegController.text = row['vehicle_reg'] ?? '';
-      containerController.text = row['container_number'] ?? '';
+        bookingController.notifyListeners();
 
-      if (row['qty_pallets'] != null) {
-        qtyPalletsController.text = row['qty_pallets'].toString();
-      } else if (row['qty_cases'] != null) {
-        qtyPalletsController.text = row['qty_cases'].toString();
+        // ---- restore text fields ----
+        referenceController.text = row['reference'] ?? '';
+        carrierController.text = row['carrier'] ?? '';
+        vehicleRegController.text = row['vehicle_reg'] ?? '';
+        containerController.text = row['container_number'] ?? '';
+
+        if (row['qty_pallets'] != null) {
+          qtyPalletsController.text = row['qty_pallets'].toString();
+        } else if (row['qty_cases'] != null) {
+          qtyPalletsController.text = row['qty_cases'].toString();
+        }
+
+        dateController.text = DateFormat('dd/MM/yyyy').format(restoredDate);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't load booking — please try again")),
+        );
       }
-
-      dateController.text =
-          '${restoredDate.day}/${restoredDate.month}/${restoredDate.year}';
     }
 
-    if (editingBookingId != null) {
-      _eventsFuture = _fetchBookingEvents();
-    }
     if (!mounted) return;
     setState(() => loading = false);
   }
@@ -231,247 +238,156 @@ class _BookingFormPageState extends State<BookingFormPage> {
   // ---------------- DATA LOAD ----------------
 
   Future<void> _loadCustomers() async {
-    final user = supabase.auth.currentUser!;
-
-    final roles = await supabase
-        .from('user_roles')
-        .select('scope_type, scope_type_id')
-        .eq('user_id', user.id);
-
-    final customerIds = <int>{};
-    final siteIds = <int>{};
-    bool isGlobal = false;
-
-    for (final r in roles) {
-      if (r['scope_type'] == 'global') {
-        isGlobal = true;
-      }
-
-      if (r['scope_type'] == 'customer') {
-        customerIds.add(r['scope_type_id']);
-      }
-
-      if (r['scope_type'] == 'site') {
-        siteIds.add(r['scope_type_id']);
-      }
-    }
-
-    List<Map<String, dynamic>> rows;
-    if (isGlobal) {
-      rows = await supabase
-          .from('customers')
-          .select('customer_id, customer_name')
-          .eq('active', true)
-          .order('customer_name');
-    } else {
-      // If site scoped → derive customers from customer_sites
-      if (siteIds.isNotEmpty) {
-        final cs = await supabase
-            .from('customer_sites')
-            .select('customer_id')
-            .inFilter('site_id', siteIds.toList());
-        customerIds.addAll(
-          cs.map((r) => r['customer_id'] as int),
+    final user = supabase.auth.currentUser;
+    if (user == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Session expired, please log in again')),
         );
       }
-      if (customerIds.isEmpty) {
-        rows = [];
-      } else {
+      return;
+    }
+
+    try {
+      final roles = await supabase
+          .from('user_roles')
+          .select('scope_type, scope_type_id')
+          .eq('user_id', user.id);
+
+      final customerIds = <int>{};
+      final siteIds = <int>{};
+      bool isGlobal = false;
+
+      for (final r in roles) {
+        if (r['scope_type'] == 'global') {
+          isGlobal = true;
+        }
+
+        if (r['scope_type'] == 'customer') {
+          customerIds.add(r['scope_type_id']);
+        }
+
+        if (r['scope_type'] == 'site') {
+          siteIds.add(r['scope_type_id']);
+        }
+      }
+
+      List<Map<String, dynamic>> rows;
+      if (isGlobal) {
         rows = await supabase
             .from('customers')
             .select('customer_id, customer_name')
-            .inFilter('customer_id', customerIds.toList())
             .eq('active', true)
             .order('customer_name');
+      } else {
+        // If site scoped → derive customers from customer_sites
+        if (siteIds.isNotEmpty) {
+          final cs = await supabase
+              .from('customer_sites')
+              .select('customer_id')
+              .inFilter('site_id', siteIds.toList());
+          customerIds.addAll(
+            cs.map((r) => r['customer_id'] as int),
+          );
+        }
+        if (customerIds.isEmpty) {
+          rows = [];
+        } else {
+          rows = await supabase
+              .from('customers')
+              .select('customer_id, customer_name')
+              .inFilter('customer_id', customerIds.toList())
+              .eq('active', true)
+              .order('customer_name');
+        }
       }
+
+      customers = rows
+          .map((c) => CustomerOption(
+                customerId: c['customer_id'],
+                name: c['customer_name'],
+              ))
+          .toList();
+
+      // ---- AUTO SELECT IF ONLY ONE CUSTOMER ----
+      if (customers.length == 1) {
+        final singleCustomerId = customers.first.customerId;
+
+        await bookingController.selectCustomer(singleCustomerId);
+        await _loadSitesForCustomer(singleCustomerId);
+      }
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't load customers — please try again")),
+      );
     }
-
-    customers = rows
-        .map((c) => CustomerOption(
-              customerId: c['customer_id'],
-              name: c['customer_name'],
-            ))
-        .toList();
-
-    // ---- AUTO SELECT IF ONLY ONE CUSTOMER ----
-    if (customers.length == 1) {
-      final singleCustomerId = customers.first.customerId;
-
-      await bookingController.selectCustomer(singleCustomerId);
-      await _loadSitesForCustomer(singleCustomerId);
-    }
-    if (mounted) setState(() {});
   }
 
 
   Future<void> _loadSitesForCustomer(int customerId) async {
-    final cs = await supabase
-        .from('customer_sites')
-        .select('site_id')
-        .eq('customer_id', customerId);
+    try {
+      final cs = await supabase
+          .from('customer_sites')
+          .select('site_id')
+          .eq('customer_id', customerId);
 
-    final siteIds = cs.map((r) => r['site_id']).toList();
+      final siteIds = cs.map((r) => r['site_id']).toList();
 
-    if (siteIds.isEmpty) {
-      sites = [];
-      return;
-    }
+      if (siteIds.isEmpty) {
+        sites = [];
+        return;
+      }
 
-    final rows = await supabase
-        .from('sites')
-        .select('site_id, site_name, site_address')
-        .inFilter('site_id', siteIds)
-        .eq('active', true)
-        .order('site_name');
+      final rows = await supabase
+          .from('sites')
+          .select('site_id, site_name, site_address')
+          .inFilter('site_id', siteIds)
+          .eq('active', true)
+          .order('site_name');
 
-    sites = rows
-        .map((s) => SiteOption(
-              siteId: s['site_id'],
-              label: '${s['site_name']} – ${s['site_address']}',
-            ))
-        .toList();
+      sites = rows
+          .map((s) => SiteOption(
+                siteId: s['site_id'],
+                label: '${s['site_name']} – ${s['site_address']}',
+              ))
+          .toList();
 
-    // ---- AUTO SELECT IF ONLY ONE SITE ----
-    if (sites.length == 1) {
-      await bookingController.selectSite(sites.first.siteId);
+      // ---- AUTO SELECT IF ONLY ONE SITE ----
+      if (sites.length == 1) {
+        await bookingController.selectSite(sites.first.siteId);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't load sites — please try again")),
+      );
     }
   }
 
   Future<void> _loadVehicleTypes() async {
-    final rows = await supabase
-        .from('vehicle_types')
-        .select('vehicle_type_id, name, slot_units_required, load_type')
-        .eq('active', true)
-        .order('name');
+    try {
+      final rows = await supabase
+          .from('vehicle_types')
+          .select('vehicle_type_id, name, slot_units_required, load_type')
+          .eq('active', true)
+          .order('name');
 
-    vehicleTypes = rows
-        .map((v) => VehicleTypeOption(
-              vehicleTypeId: v['vehicle_type_id'],
-              name: v['name'],
-              slotUnitsRequired: v['slot_units_required'],
-              loadType: v['load_type'],
-            ))
-        .toList();
-  }
-
-  Widget _eventRow(Map<String, dynamic> e) {
-    final timestamp = DateTime.parse(e['event_timestamp']);
-    final isComment = e['event_type'] == 'comment_added';
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                e['user_name'] ?? 'System',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              Text(
-                _formatEventTime(timestamp),
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 4),
-
-          if (isComment)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              margin: const EdgeInsets.only(bottom: 4),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                'COMMENT',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue,
-                ),
-              ),
-            ),
-
-          Text(
-            e['audit_text'] ?? '',
-            overflow: TextOverflow.visible,
-            softWrap: true,
-          ),
-          const Divider(),
-        ],
-      ),
-    );
-  }
-
-  Widget _eventsPanel() {
-    if (editingBookingId == null) {
-      return const SizedBox.shrink();
+      vehicleTypes = rows
+          .map((v) => VehicleTypeOption(
+                vehicleTypeId: v['vehicle_type_id'],
+                name: v['name'],
+                slotUnitsRequired: v['slot_units_required'],
+                loadType: v['load_type'],
+              ))
+          .toList();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't load vehicle types — please try again")),
+      );
     }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-
-          const Text(
-            'Booking Activity',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // 🔑 Scroll lives here, but height comes from parent
-          Expanded(
-            child: FutureBuilder<List<Map<String, dynamic>>>(
-              future: _eventsFuture,
-              builder: (context, snapshot) {
-
-                if (!snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                }
-
-                final events = snapshot.data!;
-
-                if (events.isEmpty) {
-                  return const Center(
-                    child: Text('No activity recorded'),
-                  );
-                }
-
-                return ListView.builder(
-                  itemCount: events.length,
-                  itemBuilder: (context, index) {
-                    return _eventRow(events[index]);
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   // ---------------- UI ----------------
@@ -534,7 +450,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                           OutlinedButton.icon(
                                             icon: const Icon(Icons.comment, size: 18),
                                             label: const Text('Comment'),
-                                            onPressed: _addComment,
+                                            onPressed: () => _activityPanelKey.currentState?.addComment(),
                                           ),
                                         ],
                                       ],
@@ -590,20 +506,30 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                   children: [
                                     Expanded(child: _container()),
                                     const SizedBox(width: 24),
-                                    Expanded(child: _packingListMainButton()),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                Row(
-                                  children: [
-                                    const Spacer(),
                                     Expanded(
-                                      child: _packingListSecondaryActions(),
+                                      child: PackingListWidget(
+                                        key: _packingListKey,
+                                        initialExistingPath: existingPackingListPath,
+                                        isView: isView,
+                                        supabase: supabase,
+                                        onChanged: (file, removed) => setState(() {
+                                          packingListFile = file;
+                                          packingListRemoved = removed;
+                                        }),
+                                      ),
                                     ),
                                   ],
                                 ),
+
+                                if (isCreate) ...[
+                                  const SizedBox(height: 16),
+                                  TextField(
+                                    controller: _commentController,
+                                    maxLines: 4,
+                                    minLines: 3,
+                                    decoration: _denseDecoration('Add a comment (optional)'),
+                                  ),
+                                ],
 
                                 const SizedBox(height: 32),
 
@@ -620,9 +546,48 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
                       Expanded(
                         flex: 2,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 48),
-                          child: _eventsPanel(), // 🔑 remove SizedBox
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (!isCreate && _bookingRef != null)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text.rich(
+                                  TextSpan(
+                                    children: [
+                                      const TextSpan(
+                                        text: 'Booking Ref: ',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      TextSpan(
+                                        text: _bookingRef!,
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          color: Color(0xFF1558D6),
+                                          decoration: TextDecoration.underline,
+                                          decorationColor: Color(0xFF1558D6),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            Expanded(
+                              child: Padding(
+                                padding: EdgeInsets.only(
+                                  top: (!isCreate && _bookingRef != null) ? 0 : 48,
+                                ),
+                                child: BookingActivityPanel(
+                                  key: _activityPanelKey,
+                                  bookingId: editingBookingId,
+                                  supabase: supabase,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -647,13 +612,15 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 child: Text(c.name, style: const TextStyle(fontSize: 13)),
               ))
           .toList(),
-      dropdownStyleData: const DropdownStyleData(maxHeight: 260),
+      dropdownStyleData: const DropdownStyleData(maxHeight: 260, decoration: BoxDecoration(color: BrandColors.background)),
       menuItemStyleData: const MenuItemStyleData(height: 32),
       onChanged: isView ? null : (v) async {
         await bookingController.selectCustomer(v);
         sites.clear();
         dateController.clear();
         packingListFile = null;
+        packingListRemoved = false;
+        _packingListKey = UniqueKey();
         if (v != null) {
           await _loadSitesForCustomer(v);
         }
@@ -675,7 +642,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 child: Text(s.label, style: const TextStyle(fontSize: 13)),
               ))
           .toList(),
-      dropdownStyleData: const DropdownStyleData(maxHeight: 260),
+      dropdownStyleData: const DropdownStyleData(maxHeight: 260, decoration: BoxDecoration(color: BrandColors.background)),
       menuItemStyleData: const MenuItemStyleData(height: 32),
       onChanged: isView ? null : (v) async {
         await bookingController.selectSite(v);
@@ -696,7 +663,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 child: Text(v.name, style: const TextStyle(fontSize: 13)),
               ))
           .toList(),
-      dropdownStyleData: const DropdownStyleData(maxHeight: 260),
+      dropdownStyleData: const DropdownStyleData(maxHeight: 260, decoration: BoxDecoration(color: BrandColors.background)),
       menuItemStyleData: const MenuItemStyleData(height: 32),
       onChanged: isView ? null : (v) async {
         await bookingController.selectVehicleType(v);
@@ -729,7 +696,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 ),
               ))
           .toList(),
-      dropdownStyleData: const DropdownStyleData(maxHeight: 260),
+      dropdownStyleData: const DropdownStyleData(maxHeight: 260, decoration: BoxDecoration(color: BrandColors.background)),
       menuItemStyleData: const MenuItemStyleData(height: 32),
       onChanged: isView ? null : bookingController.selectStartTime,
     );
@@ -750,13 +717,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
       onTap: (!enabled || isView)
           ? null
           : () async {
-            print('DATE TAP FIRED');   // 👈 add this
               if (!isView) {
                 await bookingController.computeBookableDates();
               }
-              print('DATES: ${bookingController.bookableDates.length}');
               if (bookingController.bookableDates.isEmpty) {
-                debugPrint('No bookable dates returned');
                 return;
               }
 
@@ -782,6 +746,15 @@ class _BookingFormPageState extends State<BookingFormPage> {
                         b.day == d.day,
                   );
                 },
+                builder: (context, child) => Theme(
+                  data: Theme.of(context).copyWith(
+                    colorScheme: Theme.of(context).colorScheme.copyWith(
+                      surface: BrandColors.background,
+                      surfaceContainerHigh: BrandColors.background,
+                    ),
+                  ),
+                  child: child!,
+                ),
               );
 
               if (picked != null) {
@@ -806,11 +779,21 @@ class _BookingFormPageState extends State<BookingFormPage> {
   }
 
 
-  Widget _deliveryReferenceField() =>
-      TextField(controller: referenceController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Delivery Reference *'));
+  Widget _deliveryReferenceField() => TextField(
+    controller: referenceController,
+    readOnly: isView,
+    showCursor: !isView,
+    decoration: _desktopDropdownDecoration('Delivery Reference *'),
+    inputFormatters: [LengthLimitingTextInputFormatter(100)],
+  );
 
-  Widget _carrierField() =>
-      TextField(controller: carrierController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Carrier *'));
+  Widget _carrierField() => TextField(
+    controller: carrierController,
+    readOnly: isView,
+    showCursor: !isView,
+    decoration: _desktopDropdownDecoration('Carrier *'),
+    inputFormatters: [LengthLimitingTextInputFormatter(100)],
+  );
 
   Widget _qtyPallets() {
     final loadType = bookingController.selectedVehicleType?.loadType;
@@ -825,101 +808,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
     );
   }
 
-  Widget _vehicleReg() =>
-      TextField(controller: vehicleRegController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Vehicle Reg'));
+  Widget _vehicleReg() => TextField(
+    controller: vehicleRegController,
+    readOnly: isView,
+    showCursor: !isView,
+    decoration: _desktopDropdownDecoration('Vehicle Reg'),
+    textCapitalization: TextCapitalization.characters,
+    inputFormatters: [LengthLimitingTextInputFormatter(20)],
+  );
 
-  Widget _container() =>
-      TextField(controller: containerController, readOnly: isView, showCursor: !isView, decoration: _desktopDropdownDecoration('Container Number'));
-
-  Widget _packingListMainButton() {
-    final hasExisting =
-        existingPackingListPath != null && !packingListRemoved;
-
-    final hasNew = packingListFile != null;
-
-    String label;
-
-    if (hasNew) {
-      label = packingListFile!.name;
-    } else if (hasExisting) {
-      label = 'Replace Packing List';
-    } else {
-      label = 'Upload Packing List';
-    }
-
-    return SizedBox(
-      height: 44, // matches TextField visual height
-      child: OutlinedButton.icon(
-        icon: const Icon(Icons.upload_file, size: 18),
-        label: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(label, overflow: TextOverflow.ellipsis),
-        ),
-        style: OutlinedButton.styleFrom(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(4), // same as OutlineInputBorder default
-          ),
-        ),
-        onPressed: () async {
-          if (isView) return;
-
-          final result =
-              await FilePicker.platform.pickFiles(withData: true);
-
-          if (result != null) {
-            setState(() {
-              packingListFile = result.files.first;
-              packingListRemoved = false;
-            });
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _packingListSecondaryActions() {
-    final hasExisting =
-        existingPackingListPath != null && !packingListRemoved;
-
-    final hasNew = packingListFile != null;
-
-    if (!hasExisting) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-
-        if (hasExisting && !hasNew)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: TextButton(
-            onPressed: () async {
-              final signedUrl = await supabase.storage
-                  .from('booking-documents')
-                  .createSignedUrl(
-                    existingPackingListPath!,
-                    60,
-                  );
-
-              await launchUrl(Uri.parse(signedUrl));
-            },
-            child: const Text('View Existing Packing List'),
-          ),
-        ),
-
-        if (!isView)
-          TextButton(
-            onPressed: () {
-              setState(() {
-                packingListRemoved = true;
-                packingListFile = null;
-              });
-            },
-            child: const Text('Remove Packing List'),
-          ),
-      ],
-    );
-  }
+  Widget _container() => TextField(
+    controller: containerController,
+    readOnly: isView,
+    showCursor: !isView,
+    decoration: _desktopDropdownDecoration('Container Number'),
+    textCapitalization: TextCapitalization.characters,
+    inputFormatters: [LengthLimitingTextInputFormatter(30)],
+  );
 
   // ---------------- ACTIONS ----------------
   void _handleClose() {
@@ -944,95 +849,6 @@ class _BookingFormPageState extends State<BookingFormPage> {
       mode = BookingFormMode.edit;
     });
   }
-  Future<void> _addComment() async {
-    if (editingBookingId == null) return;
-
-    final controller = TextEditingController();
-
-    final result = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Add Comment'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'Enter comment...',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                final text = controller.text.trim();
-                if (text.isEmpty) return;
-                Navigator.of(dialogContext).pop(text);
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (result == null) return;
-
-    await _insertComment(result);
-  }
-
-  Future<void> _insertComment(String comment) async {
-    final user = supabase.auth.currentUser;
-
-    if (user == null || editingBookingId == null) return;
-
-    try {
-      await supabase.from('booking_events').insert({
-        'booking_id': editingBookingId,
-        'event_type': 'comment_added',
-        'user_id': user.id,
-        'audit_text': comment,
-      });
-
-      _refreshEventsPanel();
-
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to add comment: $e')),
-      );
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchBookingEvents() async {
-    if (editingBookingId == null) {
-      return [];
-    }
-
-    final response = await supabase
-        .from('booking_events_view')
-        .select()
-        .eq('booking_id', editingBookingId!)
-        .order('event_timestamp', ascending: false);
-
-    return List<Map<String, dynamic>>.from(response);
-  }
-  String _formatEventTime(DateTime dt) {
-    return DateFormat('dd/MM/yyyy HH:mm').format(dt);
-  }
-
-  void _refreshEventsPanel() {
-    setState(() {
-      _eventsFuture = _fetchBookingEvents();
-    });
-  }
-
   String? _validateMandatoryFields() {
     final qty = int.tryParse(qtyPalletsController.text);
     if (bookingController.selectedCustomer == null) {return 'Customer is required';}
@@ -1043,6 +859,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
     if (referenceController.text.trim().isEmpty) {return 'Delivery reference is required';}
     if (carrierController.text.trim().isEmpty) {return 'Carrier is required';}
     if (qty == null || qty <= 0) {return 'Quantity is required';}
+    if (qty > 9999) {return 'Quantity cannot exceed 9999';}
 
     // ---- packing list validation ----
     final hasExisting =existingPackingListPath != null && !packingListRemoved;
@@ -1092,58 +909,66 @@ class _BookingFormPageState extends State<BookingFormPage> {
     final bookingDate =
         DateTime(date.year, date.month, date.day).toIso8601String().split('T').first;
 
-    // 1️⃣ Get quota
-    final quotaRow = await supabase
-        .from('customer_daily_quota')
-        .select('max_daily_pallets')
-        .eq('customer_id', customerId)
-        .eq('site_id', siteId)
-        .maybeSingle();
-
-    if (quotaRow == null) {
-      // No quota configured = no restriction
-      return null;
-    }
-
-    final maxDaily = quotaRow['max_daily_pallets'] as int;
-
-    // 2️⃣ Get current actuals
-    final actualRow = await supabase
-        .from('customer_daily_pallet_actuals')
-        .select('total_pallets')
-        .eq('customer_id', customerId)
-        .eq('site_id', siteId)
-        .eq('booking_date', bookingDate)
-        .maybeSingle();
-
-    final currentTotal =
-        actualRow == null ? 0 : (actualRow['total_pallets'] as int);
-
-    // 3️⃣ If editing, subtract original qty
-    int originalQty = 0;
-    if (editingBookingId != null) {
-      final original = await supabase
-          .from('bookings')
-          .select('qty_pallets')
-          .eq('booking_id', editingBookingId!)
+    try {
+      // 1️⃣ Get quota
+      final quotaRow = await supabase
+          .from('customer_daily_quota')
+          .select('max_daily_pallets')
+          .eq('customer_id', customerId)
+          .eq('site_id', siteId)
           .maybeSingle();
 
-      if (original != null && original['qty_pallets'] != null) {
-        originalQty = original['qty_pallets'] as int;
+      if (quotaRow == null) {
+        // No quota configured = no restriction
+        return null;
       }
+
+      final maxDaily = quotaRow['max_daily_pallets'] as int;
+
+      // 2️⃣ Get current actuals
+      final actualRow = await supabase
+          .from('customer_daily_pallet_actuals')
+          .select('total_pallets')
+          .eq('customer_id', customerId)
+          .eq('site_id', siteId)
+          .eq('booking_date', bookingDate)
+          .maybeSingle();
+
+      final currentTotal =
+          actualRow == null ? 0 : (actualRow['total_pallets'] as int);
+
+      // 3️⃣ If editing, subtract original qty
+      int originalQty = 0;
+      if (editingBookingId != null) {
+        final original = await supabase
+            .from('bookings')
+            .select('qty_pallets')
+            .eq('booking_id', editingBookingId!)
+            .maybeSingle();
+
+        if (original != null && original['qty_pallets'] != null) {
+          originalQty = original['qty_pallets'] as int;
+        }
+      }
+
+      final adjustedTotal = currentTotal - originalQty + qty;
+
+      if (adjustedTotal > maxDaily) {
+        final remaining = maxDaily - (currentTotal - originalQty);
+
+        return 'Daily pallet limit exceeded. '
+              'Maximum allowed: $maxDaily. '
+              'Remaining available: ${remaining < 0 ? 0 : remaining}.';
+      }
+
+      return null;
+    } catch (e) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't check daily quota — please try again")),
+      );
+      return null;
     }
-
-    final adjustedTotal = currentTotal - originalQty + qty;
-
-    if (adjustedTotal > maxDaily) {
-      final remaining = maxDaily - (currentTotal - originalQty);
-
-      return 'Daily pallet limit exceeded. '
-            'Maximum allowed: $maxDaily. '
-            'Remaining available: ${remaining < 0 ? 0 : remaining}.';
-    }
-
-    return null;
   }
 
   Widget _actionButtons() {
@@ -1208,6 +1033,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Discard Changes'),
         content: const Text(
           'Are you sure you want to discard any changes?',
@@ -1237,6 +1063,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Cancel Booking'),
         content: const Text(
           'Are you sure you want to cancel this booking?',
@@ -1271,8 +1098,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
                 if (!mounted) return;
 
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Cancellation failed: $e'),
+                  const SnackBar(
+                    content: Text("Couldn't cancel booking — please try again"),
                   ),
                 );
               }
@@ -1290,107 +1117,147 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(isEditing ? 'Update booking' : 'Confirm booking'),
-        content: Text(
-          isEditing
-              ? 'Are you sure you want to update the booking?'
-              : 'Are you sure you want to confirm the booking?\n\n'
-                'Once confirmed, the delivery slot will be reserved.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('No'),
+      builder: (dialogContext) {
+        bool isSubmitting = false;
+        return StatefulBuilder(
+          builder: (_, setDialogState) => AlertDialog(
+            backgroundColor: BrandColors.background,
+            title: Text(isEditing ? 'Update booking' : 'Confirm booking'),
+            content: Text(
+              isEditing
+                  ? 'Are you sure you want to update the booking?'
+                  : 'Are you sure you want to confirm the booking?\n\n'
+                    'Once confirmed, the delivery slot will be reserved.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSubmitting ? null : () {
+                  Navigator.of(dialogContext).pop();
+                },
+                child: const Text('No'),
+              ),
+              TextButton(
+                onPressed: isSubmitting
+                    ? null
+                    : () async {
+                        final validationError = _validateMandatoryFields();
+                        final quotaError = await _checkCustomerDailyQuota();
+
+                        // ---- QUOTA FAIL ----
+                        if (quotaError != null) {
+                          if (!mounted) return;
+
+                          Navigator.of(dialogContext).pop(); // CLOSE POPUP
+
+                          ScaffoldMessenger.of(pageContext).showSnackBar(
+                            SnackBar(content: Text(quotaError)),
+                          );
+                          return;
+                        }
+
+                        // ---- VALIDATION FAIL ----
+                        if (validationError != null) {
+                          if (!mounted) return;
+
+                          Navigator.of(dialogContext).pop(); // CLOSE POPUP
+
+                          ScaffoldMessenger.of(pageContext).showSnackBar(
+                            SnackBar(content: Text(validationError)),
+                          );
+                          return;
+                        }
+
+                        setDialogState(() => isSubmitting = true);
+
+                        try {
+                          final booking = await bookingService.confirmBooking(
+                            controller: bookingController,
+                            bookingId: editingBookingId,
+                            vehicleTypeId:
+                                bookingController.selectedVehicleType!.vehicleTypeId,
+                            slotUnitsRequired:
+                                bookingController.selectedVehicleType!.slotUnitsRequired,
+                            reference: referenceController.text.trim(),
+                            carrier: carrierController.text.trim(),
+                            vehicleReg: vehicleRegController.text.trim(),
+                            container: containerController.text.trim(),
+                            qtyPallets:
+                                bookingController.selectedVehicleType?.loadType == 'pallet' &&
+                                        qtyPalletsController.text.isNotEmpty
+                                    ? int.parse(qtyPalletsController.text)
+                                    : null,
+                            qtyCases:
+                                bookingController.selectedVehicleType?.loadType == 'container' &&
+                                        qtyPalletsController.text.isNotEmpty
+                                    ? int.parse(qtyPalletsController.text)
+                                    : null,
+                            packingListFile: packingListFile,
+                            existingPackingListPath: existingPackingListPath,
+                            packingListRemoved: packingListRemoved,
+                          );
+                          final bookingRef = booking['booking_ref'];
+
+                          if (!mounted) return;
+
+                          final comment = _commentController.text.trim();
+                          if (!isEditing && comment.isNotEmpty) {
+                            final user = supabase.auth.currentUser;
+                            if (user != null) {
+                              try {
+                                await supabase.from('booking_events').insert({
+                                  'booking_id': booking['booking_id'].toString(),
+                                  'event_type': 'comment_added',
+                                  'user_id': user.id,
+                                  'audit_text': comment,
+                                });
+                              } catch (_) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(pageContext).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Booking confirmed. Comment could not be saved.'),
+                                    ),
+                                  );
+                                }
+                              }
+                            }
+                            if (!mounted) return;
+                          }
+
+                          Navigator.of(dialogContext).pop();
+                          Navigator.of(context).pushNamedAndRemoveUntil(
+                            '/inbound-overview',
+                            (route) => false,
+                            arguments: {
+                              'booking_confirmed': true,
+                              'was_edit': editingBookingId != null,
+                              'booking_ref': bookingRef,
+                            },
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+
+                          setDialogState(() => isSubmitting = false);
+                          Navigator.of(dialogContext).pop(); // CLOSE POPUP
+
+                          ScaffoldMessenger.of(pageContext).showSnackBar(
+                            const SnackBar(
+                              content: Text("Couldn't confirm booking — please try again"),
+                            ),
+                          );
+                        }
+                      },
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Yes'),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () async {
-              final validationError = _validateMandatoryFields();
-              final quotaError = await _checkCustomerDailyQuota();
-
-              // ---- QUOTA FAIL ----
-              if (quotaError != null) {
-                if (!mounted) return;
-
-                Navigator.of(dialogContext).pop(); // CLOSE POPUP
-
-                ScaffoldMessenger.of(pageContext).showSnackBar(
-                  SnackBar(content: Text(quotaError)),
-                );
-                return;
-              }
-
-              // ---- VALIDATION FAIL ----
-              if (validationError != null) {
-                if (!mounted) return;
-
-                Navigator.of(dialogContext).pop(); // CLOSE POPUP
-
-                ScaffoldMessenger.of(pageContext).showSnackBar(
-                  SnackBar(content: Text(validationError)),
-                );
-                return;
-              }
-
-              try {
-                final booking = await bookingService.confirmBooking(
-                  controller: bookingController,
-                  bookingId: editingBookingId,
-                  vehicleTypeId:
-                      bookingController.selectedVehicleType!.vehicleTypeId,
-                  slotUnitsRequired:
-                      bookingController.selectedVehicleType!.slotUnitsRequired,
-                  reference: referenceController.text,
-                  carrier: carrierController.text,
-                  vehicleReg: vehicleRegController.text,
-                  container: containerController.text,
-                  qtyPallets:
-                      bookingController.selectedVehicleType?.loadType == 'pallet' &&
-                              qtyPalletsController.text.isNotEmpty
-                          ? int.parse(qtyPalletsController.text)
-                          : null,
-                  qtyCases:
-                      bookingController.selectedVehicleType?.loadType == 'container' &&
-                              qtyPalletsController.text.isNotEmpty
-                          ? int.parse(qtyPalletsController.text)
-                          : null,
-                  packingListFile: packingListFile,
-                  existingPackingListPath: existingPackingListPath,
-                  packingListRemoved: packingListRemoved,
-                );
-                final bookingRef = booking['booking_ref'];
-
-                if (!mounted) return;
-
-                Navigator.of(dialogContext).pop();
-                Navigator.of(context).pushNamedAndRemoveUntil(
-                  '/inbound-overview',
-                  (route) => false,
-                  arguments: {
-                    'booking_confirmed': true,
-                    'was_edit': editingBookingId != null,
-                    'booking_ref': bookingRef, 
-                  },
-                );
-
-              } catch (e) {
-                if (!mounted) return;
-
-                Navigator.of(dialogContext).pop(); // CLOSE POPUP
-
-                ScaffoldMessenger.of(pageContext).showSnackBar(
-                  SnackBar(
-                    content: Text('Booking confirmation failed: $e'),
-                  ),
-                );
-              }
-            },
-            child: const Text('Yes'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1405,6 +1272,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
     containerController.dispose();
     qtyPalletsController.dispose();
     dateController.dispose();
+    _commentController.dispose();
     super.dispose();
   }
 }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../constants/app_constants.dart';
+import '../services/supabase_service.dart';
 import '../theme/brand_text.dart';
 import '../theme/brand_colors.dart';
 
@@ -22,6 +24,7 @@ class _SignInPageState extends State<SignInPage> {
   final _passwordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _passwordFocusNode = FocusNode();
 
   String? _errorMessage;
   String? _infoMessage;
@@ -29,16 +32,21 @@ class _SignInPageState extends State<SignInPage> {
   bool _forcePasswordReset = false;
 
   DateTime? _lastResetSentAt;
-  static const Duration _resetCooldown = Duration(seconds: 30);
 
   bool get _canSendReset =>
       _lastResetSentAt == null ||
-      DateTime.now().difference(_lastResetSentAt!) > _resetCooldown;
+      DateTime.now().difference(_lastResetSentAt!) > AppConstants.passwordResetCooldown;
 
   @override
   void initState() {
     super.initState();
     _loadRememberedEmail();
+  }
+
+  @override
+  void dispose() {
+    _passwordFocusNode.dispose();
+    super.dispose();
   }
 
   // ---------------------------------------------------------------------------
@@ -101,7 +109,7 @@ class _SignInPageState extends State<SignInPage> {
 
     try {
       final res =
-          await Supabase.instance.client.auth.signInWithPassword(
+          await supabase.auth.signInWithPassword(
         email: email,
         password: password,
       );
@@ -147,8 +155,8 @@ class _SignInPageState extends State<SignInPage> {
       return _setError('Both password fields are required');
     }
 
-    if (newPassword.length < 6) {
-      return _setError('Password must be at least 6 characters long');
+    if (newPassword.length < 8) {
+      return _setError('Password must be at least 8 characters long');
     }
 
     if (newPassword != confirmPassword) {
@@ -161,7 +169,7 @@ class _SignInPageState extends State<SignInPage> {
     });
 
     try {
-      await Supabase.instance.client.auth.updateUser(
+      await supabase.auth.updateUser(
         UserAttributes(
           password: newPassword,
           data: {'force_password_reset': false},
@@ -188,6 +196,7 @@ class _SignInPageState extends State<SignInPage> {
   // ---------------------------------------------------------------------------
 
   Future<void> _sendPasswordReset() async {
+    if (_isLoading) return;
     final email = _emailController.text.trim();
     if (email.isEmpty) return _setError('Enter your email address');
 
@@ -203,7 +212,7 @@ class _SignInPageState extends State<SignInPage> {
     });
 
     try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+      await supabase.auth.resetPasswordForEmail(email);
 
       if (!mounted) return;
 
@@ -212,8 +221,12 @@ class _SignInPageState extends State<SignInPage> {
         _infoMessage = 'Password reset email sent';
         _isLoading = false;
       });
-    } catch (_) {
-      _setError('Failed to send reset email');
+    } catch (e) {
+      if (e is AuthException && e.statusCode == '429') {
+        _setError('Too many reset emails sent, please try again later.');
+      } else {
+        _setError('Failed to send reset email');
+      }
     }
   }
 
@@ -271,6 +284,7 @@ class _SignInPageState extends State<SignInPage> {
                           child: TextField(
                             controller: _emailController,
                             enabled: !_forcePasswordReset,
+                            onSubmitted: (_) => _passwordFocusNode.requestFocus(),
                             decoration: const InputDecoration(
                               labelText: 'Email',
                               border: OutlineInputBorder(),
@@ -286,6 +300,7 @@ class _SignInPageState extends State<SignInPage> {
                             child: TextField(
                               controller: _passwordController,
                               obscureText: true,
+                              focusNode: _passwordFocusNode,
                               onSubmitted: (_) => _handleLogin(),
                               decoration: const InputDecoration(
                                 labelText: 'Password',
@@ -296,13 +311,11 @@ class _SignInPageState extends State<SignInPage> {
                           const SizedBox(height: 12),
 
                           GestureDetector(
-                            onTap: _canSendReset ? _sendPasswordReset : null,
+                            onTap: _sendPasswordReset,
                             child: Text(
                               'Forgot password?',
                               style: TextStyle(
-                                color: _canSendReset
-                                    ? BrandColors.lightBlue
-                                    : Colors.grey,
+                                color: BrandColors.lightBlue,
                                 decoration: TextDecoration.underline,
                               ),
                             ),

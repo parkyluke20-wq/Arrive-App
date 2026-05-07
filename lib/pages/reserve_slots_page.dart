@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 
+import '../constants/app_constants.dart';
+import '../services/supabase_service.dart';
+import '../services/user_session.dart';
 import '../layouts/app_scaffold.dart';
 import '../theme/brand_colors.dart';
 
@@ -14,9 +17,8 @@ class ReserveSlotsPage extends StatefulWidget {
 }
 
 class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
-  final SupabaseClient supabase = Supabase.instance.client;
-
   bool loading = true;
+  String? _error;
 
   List<Map<String, dynamic>> sites = [];
   List<Map<String, dynamic>> pools = [];
@@ -42,20 +44,19 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
   }
 
   Future<void> _initialise() async {
-    await _checkAccess();
-    await _loadSites();
-    if (mounted) setState(() => loading = false);
+    try {
+      await _checkAccess();
+      await _loadSites();
+    } catch (e) {
+      if (mounted) setState(() => _error = "Couldn't load page — please try again");
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
   }
 
   Future<void> _checkAccess() async {
-    final user = supabase.auth.currentUser!;
-    final roles = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id)
-        .inFilter('role', ['internal_admin', 'internal_user']);
-
-    if (roles.isEmpty && mounted) {
+    final role = await UserSession.instance.getRole();
+    if (role != 'internal_admin' && role != 'internal_user' && mounted) {
       Navigator.pop(context);
     }
   }
@@ -65,11 +66,11 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
   // ==========================================================
 
   Future<void> _loadSites() async {
-    final rows = await supabase
+    final rows = await withRetry(() => supabase
         .from('sites')
         .select('site_id, site_name')
         .eq('active', true)
-        .order('site_name');
+        .order('site_name'));
 
     sites = rows;
 
@@ -82,12 +83,12 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
   Future<void> _loadPools() async {
     if (selectedSite == null) return;
 
-    final rows = await supabase
+    final rows = await withRetry(() => supabase
         .from('capacity_pools')
         .select('pool_id, pool_name')
         .eq('site_id', selectedSite!)
         .eq('active', true)
-        .order('pool_name');
+        .order('pool_name'));
 
     pools = rows;
     setState(() {});
@@ -104,14 +105,14 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
 
     final end = start.add(const Duration(days: 1));
 
-    final rows = await supabase
+    final rows = await withRetry(() => supabase
         .from('time_slot_availability')
         .select('slot_start')
         .eq('pool_id', selectedPool!)
         .eq('slot_status', 'available')
         .gte('slot_start', start.toIso8601String())
         .lt('slot_start', end.toIso8601String())
-        .order('slot_start');
+        .order('slot_start'));
 
     availableSlots = rows
         .map<DateTime>((r) => DateTime.parse(r['slot_start']))
@@ -139,7 +140,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
 
       final prev = current.last;
 
-      if (slot.difference(prev) == const Duration(minutes: 30)) {
+      if (slot.difference(prev) == AppConstants.slotDuration) {
         current.add(slot);
       } else {
         groups.add(current);
@@ -184,7 +185,12 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
 
     try {
       final groups = _groupContiguous(List.from(selectedSlots));
-      final userId = supabase.auth.currentUser!.id;
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        _snack('Session expired, please log in again');
+        return;
+      }
+      final userId = user.id;
 
       for (final group in groups) {
         await supabase.from('outbound_reservations').insert({
@@ -192,7 +198,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
           'pool_id': selectedPool,
           'start_time': group.first.toIso8601String(),
           'end_time': group.last
-              .add(const Duration(minutes: 30))
+              .add(AppConstants.slotDuration)
               .toIso8601String(),
           'reason': reasonController.text.trim(),
           'reserved_by': userId,
@@ -203,7 +209,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
 
       _snack('Reservation confirmed');
 
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(AppConstants.postReservationDelay);
 
       if (!mounted) return;
 
@@ -214,7 +220,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      _snack('Reservation failed: $e');
+      _snack("Couldn't confirm reservation — please try again");
     }
   }
 
@@ -231,6 +237,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Confirm Reservation?'),
         content: const Text(
             'Are you sure you want to confirm this reservation?'),
@@ -255,6 +262,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: BrandColors.background,
         title: const Text('Cancel Reservation?'),
         content:
             const Text('Are you sure you want to cancel the reservation?'),
@@ -293,7 +301,9 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
         padding: const EdgeInsets.all(24),
         child: loading
             ? const Center(child: CircularProgressIndicator())
-            : Align(
+            : _error != null
+                ? Center(child: Text(_error!))
+                : Align(
                 alignment: Alignment.topLeft,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 900),
@@ -330,6 +340,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
                         controller: reasonController,
                         decoration: _decoration('Reason (optional)'),
                         maxLines: 2,
+                        inputFormatters: [LengthLimitingTextInputFormatter(255)],
                       ),
 
                       const SizedBox(height: 24),
@@ -372,7 +383,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
       value: selectedSite,
       decoration: _decoration('Site *'),
       dropdownStyleData:
-          const DropdownStyleData(maxHeight: 260),
+          const DropdownStyleData(maxHeight: 260, decoration: BoxDecoration(color: BrandColors.background)),
       menuItemStyleData:
           const MenuItemStyleData(height: 32),
       items: sites
@@ -402,7 +413,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
       value: selectedPool,
       decoration: _decoration('Pool *'),
       dropdownStyleData:
-          const DropdownStyleData(maxHeight: 260),
+          const DropdownStyleData(maxHeight: 260, decoration: BoxDecoration(color: BrandColors.background)),
       menuItemStyleData:
           const MenuItemStyleData(height: 32),
       items: pools
@@ -438,7 +449,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
                 initialDate: DateTime.now(),
                 firstDate: DateTime.now(),
                 lastDate:
-                    DateTime.now().add(const Duration(days: 90)),
+                    DateTime.now().add(const Duration(days: AppConstants.maxBookingHorizonDays)),
               );
 
               if (picked != null) {
@@ -473,7 +484,7 @@ class _ReserveSlotsPageState extends State<ReserveSlotsPage> {
           final slot = availableSlots[index];
 
           final label =
-              '${timeFmt.format(slot)} - ${timeFmt.format(slot.add(const Duration(minutes: 30)))}';
+              '${timeFmt.format(slot)} - ${timeFmt.format(slot.add(AppConstants.slotDuration))}';
 
           return Row(
             children: [

@@ -1,0 +1,7 @@
+<IfModule mod_headers.c>
+  <FilesMatch "^(index\.html|flutter_service_worker\.js|flutter_bootstrap\.js)$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+</IfModule>

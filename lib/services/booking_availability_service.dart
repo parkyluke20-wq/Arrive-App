@@ -1,5 +1,8 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../constants/app_constants.dart';
+import 'supabase_service.dart';
+
 class BookingAvailabilityService {
   final SupabaseClient supabase;
 
@@ -14,13 +17,13 @@ class BookingAvailabilityService {
     required int siteId,
     required String loadType,
   }) async {
-    final rows = await supabase
+    final rows = await withRetry(() => supabase
         .from('eligible_capacity_pools')
         .select('pool_id')
         .eq('customer_id', customerId)
         .eq('site_id', siteId)
         .eq('is_allowed', true)
-        .eq('load_type', loadType);
+        .eq('load_type', loadType));
 
     final pools =
         rows.map((r) => r['pool_id'].toString()).toSet();
@@ -39,16 +42,16 @@ class BookingAvailabilityService {
     final fromIso = from.toIso8601String();
     final toIso = to.toIso8601String();
 
-    final response = await supabase
+    final response = await withRetry(() => supabase
       .from('slot_availability_projection')
       .select('pool_id, slot_start, slot_status, visible')
       .eq('site_id', siteId)
       .gte('slot_start', fromIso)
       .lt('slot_start', toIso)
       .order('slot_start', ascending: true)
-      .range(0, 5000);
+      .range(0, AppConstants.maxSlotQueryLimit));
 
-    return List<Map<String, dynamic>>.from(response).map((r) {
+    final result = List<Map<String, dynamic>>.from(response).map((r) {
       return {
         'pool_id': r['pool_id'].toString(),
         'slot_start': r['slot_start'],
@@ -56,6 +59,11 @@ class BookingAvailabilityService {
         'visible': r['visible'],
       };
     }).toList();
+
+    assert(result.length < AppConstants.maxSlotQueryLimit,
+        'Slot query hit the limit — review maxSlotQueryLimit in AppConstants');
+
+    return result;
   }
 
   // ------------------------------------------------------------
@@ -68,7 +76,7 @@ class BookingAvailabilityService {
     required int requiredSlots,
   }) {
     final DateTime minAllowed =
-        DateTime.now().add(const Duration(hours: 24));
+        DateTime.now().add(AppConstants.minAdvanceBooking);
 
     final Set<DateTime> bookableDates = {};
     final Map<DateTime, Map<String, List<DateTime>>> byDay = {};
@@ -118,7 +126,7 @@ class BookingAvailabilityService {
           }
 
           if (lastTime == null ||
-              time.difference(lastTime).inMinutes != 30) {
+              time.difference(lastTime).inMinutes != AppConstants.slotDurationMinutes) {
             run = 1;
           } else {
             run++;
@@ -180,7 +188,7 @@ class BookingAvailabilityService {
       for (final DateTime s in slots) {
         if (run.isEmpty ||
             s.difference(run.last) ==
-                const Duration(minutes: 30)) {
+                AppConstants.slotDuration) {
           run.add(s);
         } else {
           _extractStarts(run, requiredSlots, starts);

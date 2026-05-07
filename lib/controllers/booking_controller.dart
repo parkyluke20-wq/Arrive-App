@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../constants/app_constants.dart';
 import '../services/booking_availability_service.dart';
 
 /// NOTE:
@@ -111,7 +112,7 @@ class BookingController extends ChangeNotifier {
       DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
 
     final from = startOfToday.subtract(const Duration(days: 1));
-    final to = startOfToday.add(const Duration(days: 60));
+    final to = startOfToday.add(const Duration(days: AppConstants.bookingWindowDays));
     final rows = await availabilityService.availabilityRows(
       siteId: selectedSite!,
       from: from,
@@ -312,7 +313,7 @@ class HydratedBookingResult {
   final bool success;
   final DateTime? restoredDate;
   final DateTime? restoredStartTime;
-  final Map<String, dynamic>? booking; // <-- added
+  final Map<String, dynamic>? booking;
   final String? reason;
 
   HydratedBookingResult._(
@@ -326,7 +327,7 @@ class HydratedBookingResult {
   factory HydratedBookingResult.success({
     required DateTime restoredDate,
     required DateTime restoredStartTime,
-    required Map<String, dynamic> booking, // <-- added
+    required Map<String, dynamic> booking,
   }) =>
       HydratedBookingResult._(
         true,
