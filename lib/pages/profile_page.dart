@@ -44,7 +44,6 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  final ScrollController _scrollController = ScrollController();
   InputDecoration _denseDecoration(String label) => const InputDecoration(
       isDense: true,
       contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 12),
@@ -101,8 +100,7 @@ class _ProfilePageState extends State<ProfilePage> {
       );
 
       if (customers.isNotEmpty) {
-        selectedCustomerId = customers.first['customer_id'];
-        await _loadMembers();
+        selectedCustomerId = null;
       }
 
       if (mounted) setState(() => loading = false);
@@ -338,8 +336,60 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _disableCustomer() async {
+    final customerId = selectedCustomerId;
+    if (customerId == null) return;
+
+    final customerName = customers.firstWhere(
+      (c) => c['customer_id'] == customerId,
+    )['customer_name'];
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: BrandColors.background,
+        title: const Text('Disable customer'),
+        content: Text(
+          'Are you sure you want to disable $customerName?\n'
+          'They will lose access to the app immediately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: BrandColors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await supabase
+          .from('customers')
+          .update({'active': false})
+          .eq('customer_id', customerId);
+
+      setState(() {
+        customers.removeWhere((c) => c['customer_id'] == customerId);
+        selectedCustomerId = null;
+        members = [];
+      });
+
+      _snack('$customerName has been disabled');
+    } catch (e) {
+      _snack("Couldn't disable customer — please try again");
+    }
+  }
+
   Widget _memberRow(Map<String, dynamic> member) {
     final isAdmin = member['role'] == 'customer_admin';
+    final isSupplier = member['role'] == 'supplier_user';
     final isSelf = member['user_id'] == currentUserId;
 
     return Container(
@@ -357,7 +407,7 @@ class _ProfilePageState extends State<ProfilePage> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (!isAdmin && !isSelf) ...[
+          if (!isAdmin && !isSupplier && !isSelf) ...[
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: BrandColors.orange,
@@ -447,152 +497,176 @@ class _ProfilePageState extends State<ProfilePage> {
     return AppScaffold(
       title: 'Profile',
       body: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: ConstrainedBox(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+
+            // ---- FIXED: Your Details + Select Customer + Members heading ----
+            ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
-              child: SingleChildScrollView(
-                child: Column(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
                     'Your Details',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-                _detailRow('Email', currentUserEmail),
-                _detailRow('Role', effectiveRole.label),
-                const SizedBox(height: 16),
+                  ),
+                  const SizedBox(height: 12),
+                  _detailRow('Email', currentUserEmail),
+                  _detailRow('Role', effectiveRole.label),
+                  const SizedBox(height: 16),
 
-                Row(
-                  children: [
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: BrandColors.lightBlue,
-                        foregroundColor: Colors.white,
+                  Row(
+                    children: [
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: BrandColors.lightBlue,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () =>
+                            setState(() => showPasswordForm = !showPasswordForm),
+                        child: Text(
+                          showPasswordForm ? 'Cancel' : 'Update Password',
+                        ),
                       ),
-                      onPressed: () =>
-                          setState(() => showPasswordForm = !showPasswordForm),
-                      child: Text(
-                        showPasswordForm ? 'Cancel' : 'Update Password',
-                      ),
-                    ),
-
-                    const SizedBox(width: 12), // spacing between buttons
-
-                  if (effectiveRole == EffectiveRole.internalUser ||
-                  effectiveRole == EffectiveRole.internalAdmin) ...[
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: BrandColors.lightBlue,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () {
-                        showDialog(
-                          context: context,
-                          builder: (_) => _CreateUserDialog(
-                            customers: customers,
-                            effectiveRole: effectiveRole,
+                      const SizedBox(width: 12),
+                      if (effectiveRole == EffectiveRole.internalUser ||
+                          effectiveRole == EffectiveRole.internalAdmin) ...[
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: BrandColors.lightBlue,
+                            foregroundColor: Colors.white,
                           ),
-                        );
-                      },
-                      child: const Text('Create New User'),
-                    ),
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (_) => _CreateUserDialog(
+                                customers: customers,
+                                effectiveRole: effectiveRole,
+                              ),
+                            );
+                          },
+                          child: const Text('Create New User'),
+                        ),
+                      ],
                     ],
+                  ),
+
+                  if (showPasswordForm) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: newPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'New Password',
+                        helperText: 'Minimum 8 characters',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: confirmPasswordController,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Confirm Password',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: updatingPassword ? null : _updatePassword,
+                      child: updatingPassword
+                          ? const CircularProgressIndicator()
+                          : const Text('Update Password'),
+                    ),
                   ],
-                ),
 
-                if (showPasswordForm) ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: newPasswordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'New Password',
-                      helperText: 'Minimum 8 characters',
-                      border: OutlineInputBorder(),
+                  if (effectiveRole != EffectiveRole.customerUser &&
+                      effectiveRole != EffectiveRole.supplierUser &&
+                      customers.isNotEmpty) ...[
+                    const SizedBox(height: 32),
+                    const Text(
+                      'Select Customer',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: confirmPasswordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Confirm Password',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: updatingPassword ? null : _updatePassword,
-                    child: updatingPassword
-                        ? const CircularProgressIndicator()
-                        : const Text('Update Password'),
-                  ),
-                ],
-
-                if (effectiveRole != EffectiveRole.customerUser &&
-                    effectiveRole != EffectiveRole.supplierUser &&
-                    customers.isNotEmpty) ...[
-                  const SizedBox(height: 32),
-                  const Text(
-                    'Select Customer',
-                    style:
-                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField2<int>(
-                    isExpanded: true,
-                    value: selectedCustomerId,
-                    decoration: _denseDecoration('Customer'),
-                    items: customers
-                        .map(
-                          (c) => DropdownMenuItem<int>(
-                            value: c['customer_id'],
-                            child: Text(
-                              c['customer_name'],
-                              style: const TextStyle(fontSize: 13),
-                              overflow: TextOverflow.ellipsis,
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField2<int>(
+                            isExpanded: true,
+                            value: selectedCustomerId,
+                            decoration: _denseDecoration('Customer'),
+                            items: customers
+                                .map(
+                                  (c) => DropdownMenuItem<int>(
+                                    value: c['customer_id'],
+                                    child: Text(
+                                      c['customer_name'],
+                                      style: const TextStyle(fontSize: 13),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            dropdownStyleData: const DropdownStyleData(
+                              maxHeight: 260,
+                              decoration: BoxDecoration(color: BrandColors.background),
                             ),
+                            menuItemStyleData: const MenuItemStyleData(height: 32),
+                            onChanged: (value) async {
+                              setState(() => selectedCustomerId = value);
+                              await _loadMembers();
+                            },
                           ),
-                        )
-                        .toList(),
-                    dropdownStyleData: const DropdownStyleData(
-                      maxHeight: 260,
-                      decoration: BoxDecoration(color: BrandColors.background),
+                        ),
+                        if (effectiveRole == EffectiveRole.internalAdmin &&
+                            selectedCustomerId != null) ...[
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: BrandColors.red,
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                            ),
+                            onPressed: _disableCustomer,
+                            child: const Text('Disable Customer'),
+                          ),
+                        ],
+                      ],
                     ),
-                    menuItemStyleData: const MenuItemStyleData(
-                      height: 32,
+                  ],
+
+                  if (effectiveRole != EffectiveRole.supplierUser) ...[
+                    const SizedBox(height: 32),
+                    const Text(
+                      'Members',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     ),
-                    onChanged: (value) async {
-                      setState(() => selectedCustomerId = value);
-                      await _loadMembers();
-                    },
-                  ),
+                    const SizedBox(height: 12),
+                  ],
                 ],
+              ),
+            ),
 
-                const SizedBox(height: 8),
-
-                if (effectiveRole != EffectiveRole.supplierUser) ...[
-                const SizedBox(height: 32),
-                const Text(
-                  'Members',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-               Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: Column(
-                  children: members.map(_memberRow).toList(),
+            // ---- SCROLLABLE: Members list only ----
+            if (effectiveRole != EffectiveRole.supplierUser)
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 16),
+                    child: ListView.builder(
+                      itemCount: members.length,
+                      itemBuilder: (_, i) => _memberRow(members[i]),
+                    ),
+                  ),
                 ),
               ),
-                ],
-              ],
-            ),
-          ),
+          ],
         ),
-      ),
       ),
     );
   }
@@ -610,7 +684,6 @@ class _ProfilePageState extends State<ProfilePage> {
   }
   @override
   void dispose() {
-    _scrollController.dispose();
     newPasswordController.dispose();
     confirmPasswordController.dispose();
     super.dispose();

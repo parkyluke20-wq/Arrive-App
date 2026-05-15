@@ -77,6 +77,29 @@ class _InboundBookingAppState extends State<InboundBookingApp> {
         theme: ThemeData(
           scaffoldBackgroundColor: BrandColors.background,
           canvasColor: BrandColors.background,
+          colorScheme: ColorScheme.light(
+            primary: BrandColors.charcoal,
+            onPrimary: Colors.white,
+            secondary: BrandColors.charcoal,
+            onSecondary: Colors.white,
+            surface: BrandColors.background,
+            outline: Colors.grey.shade400,
+          ),
+          dividerColor: Colors.grey.shade400,
+          inputDecorationTheme: InputDecorationTheme(
+            focusedBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: Colors.grey.shade600),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: Colors.grey.shade400),
+            ),
+          ),
+          outlinedButtonTheme: OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: BrandColors.charcoal,
+              side: BorderSide(color: Colors.grey.shade400),
+            ),
+          ),
         ),
 
         locale: const Locale('en', 'GB'),

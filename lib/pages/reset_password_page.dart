@@ -35,15 +35,21 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
   }
 
   Future<void> _initRecovery() async {
-    // With HashUrlStrategy the route lives inside the URL fragment:
-    //   /#/reset-password?code=abc123
-    // Uri.base.queryParameters is empty in that case; parse from the fragment instead.
+    // With HashUrlStrategy, reset links may embed params in the fragment:
+    //   /#/reset-password?token_hash=abc123&type=recovery
+    // Parse from both the fragment query string and the real query params.
     final fragment = Uri.base.fragment;
-    final fragmentQuery = fragment.contains('?') ? fragment.split('?').last : '';
-    final code = Uri.splitQueryString(fragmentQuery)['code']
-        ?? Uri.base.queryParameters['code'];
+    final fragmentQuery =
+        fragment.contains('?') ? fragment.split('?').last : '';
+    final fragmentParams = Uri.splitQueryString(fragmentQuery);
 
-    if (code == null) {
+    String? _q(String key) =>
+        fragmentParams[key] ?? Uri.base.queryParameters[key];
+
+    final tokenHash = _q('token_hash');
+    final code = _q('code');
+
+    if (tokenHash == null && code == null) {
       if (mounted) {
         setState(() {
           _fatalError = 'Invalid or expired password reset link.';
@@ -53,15 +59,34 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       return;
     }
 
-    // Exchange the one-time code for an active session (PKCE flow).
-    // Without this, updateUser() has no session and throws "Auth session missing".
     try {
-      await supabase.auth.exchangeCodeForSession(code);
+      if (tokenHash != null) {
+        // Preferred path: token_hash requires no localStorage and works
+        // regardless of which browser the link is opened in.
+        await supabase.auth.verifyOTP(
+          tokenHash: tokenHash,
+          type: OtpType.recovery,
+        );
+      } else {
+        // Legacy PKCE path: only works when the link is opened in the same
+        // browser that initiated the reset (code_verifier must be in localStorage).
+        await supabase.auth.exchangeCodeForSession(code!);
+      }
       if (mounted) setState(() => _loading = false);
     } on AuthException catch (e) {
-      if (mounted) setState(() { _fatalError = e.message; _loading = false; });
+      if (mounted) {
+        setState(() {
+          _fatalError = e.message;
+          _loading = false;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() { _fatalError = 'Invalid or expired password reset link.'; _loading = false; });
+      if (mounted) {
+        setState(() {
+          _fatalError = 'Invalid or expired password reset link.';
+          _loading = false;
+        });
+      }
     }
   }
 

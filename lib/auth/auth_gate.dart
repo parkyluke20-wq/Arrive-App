@@ -21,9 +21,19 @@ class AuthGate extends StatelessWidget {
         }
 
         final uri = Uri.base;
-        final hasRecoveryCode = uri.queryParameters.containsKey('code');
+        // Support both PKCE (`code`) and token-hash (`token_hash`) flows.
+        // token_hash is the preferred flow: it requires no localStorage and
+        // works when the user opens the email link in a different browser.
+        final fragment = uri.fragment;
+        final fragmentQuery =
+            fragment.contains('?') ? fragment.split('?').last : '';
+        final fragmentParams = Uri.splitQueryString(fragmentQuery);
+        final hasRecovery = uri.queryParameters.containsKey('code') ||
+            uri.queryParameters.containsKey('token_hash') ||
+            fragmentParams.containsKey('code') ||
+            fragmentParams.containsKey('token_hash');
 
-        if (hasRecoveryCode) {
+        if (hasRecovery) {
           return const ResetPasswordPage();
         }
 

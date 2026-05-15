@@ -82,6 +82,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
   bool _didLoadRouteArgs = false;
   bool loading = true;
   String? bookingStatus;
+  String? _reportToPool;
   final _activityPanelKey = GlobalKey<BookingActivityPanelState>();
 
   // ---- reference data ----
@@ -153,6 +154,54 @@ class _BookingFormPageState extends State<BookingFormPage> {
       );
     }
 
+  Future<void> _resolveReportToPool() async {
+    final customerId = bookingController.selectedCustomer;
+    final siteId = bookingController.selectedSite;
+    final vehicleType = bookingController.selectedVehicleType;
+
+    if (customerId == null || siteId == null || vehicleType == null) {
+      if (mounted) setState(() => _reportToPool = null);
+      return;
+    }
+
+    try {
+      final eligibleRows = await supabase
+          .from('eligible_capacity_pools')
+          .select('pool_id')
+          .eq('customer_id', customerId)
+          .eq('site_id', siteId)
+          .eq('load_type', vehicleType.loadType)
+          .eq('is_allowed', true);
+
+      final eligibleIds =
+          eligibleRows.map((r) => r['pool_id'].toString()).toList();
+
+      if (eligibleIds.isEmpty) {
+        if (mounted) setState(() => _reportToPool = null);
+        return;
+      }
+
+      final poolRows = await supabase
+          .from('capacity_pools')
+          .select('display_name')
+          .inFilter('pool_id', eligibleIds)
+          .eq('active', true)
+          .order('priority', ascending: false)
+          .limit(1);
+
+      if (!mounted) return;
+
+      if (poolRows.isEmpty) {
+        setState(() => _reportToPool = null);
+        return;
+      }
+
+      setState(() => _reportToPool = poolRows.first['display_name'].toString());
+    } catch (_) {
+      if (mounted) setState(() => _reportToPool = null);
+    }
+  }
+
   Future<void> _init() async {
     await Future.wait([
       _loadCustomers(),
@@ -223,6 +272,8 @@ class _BookingFormPageState extends State<BookingFormPage> {
         }
 
         dateController.text = DateFormat('dd/MM/yyyy').format(restoredDate);
+
+        await _resolveReportToPool();
       } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -425,10 +476,14 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                     Row(
                                       children: [
                                         if (!isCreate)
-                                        OutlinedButton.icon(
+                                        ElevatedButton.icon(
                                           icon: const Icon(Icons.close, size: 18),
                                           label: const Text('Close'),
                                           onPressed: _handleClose,
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: BrandColors.red,
+                                            foregroundColor: BrandColors.charcoal,
+                                          ),
                                         ),
                                         if (editingBookingId != null) const SizedBox(width: 12),
                                         if (editingBookingId != null) ...[
@@ -447,10 +502,14 @@ class _BookingFormPageState extends State<BookingFormPage> {
 
                                           const SizedBox(width: 12),
 
-                                          OutlinedButton.icon(
+                                          ElevatedButton.icon(
                                             icon: const Icon(Icons.comment, size: 18),
                                             label: const Text('Comment'),
                                             onPressed: () => _activityPanelKey.currentState?.addComment(),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.blue.shade50,
+                                              foregroundColor: Colors.blue,
+                                            ),
                                           ),
                                         ],
                                       ],
@@ -478,6 +537,17 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                     Expanded(child: _timeDropdown()),
                                   ],
                                 ),
+
+                                if (_reportToPool != null) ...[
+                                  const SizedBox(height: 16),
+                                  InputDecorator(
+                                    decoration: _denseDecoration('Report To'),
+                                    child: Text(
+                                      _reportToPool!,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                ],
 
                                 const SizedBox(height: 32),
                                 _sectionTitle('Booking Details'),
@@ -621,6 +691,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
         packingListFile = null;
         packingListRemoved = false;
         _packingListKey = UniqueKey();
+        _reportToPool = null;
         if (v != null) {
           await _loadSitesForCustomer(v);
         }
@@ -646,6 +717,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
       menuItemStyleData: const MenuItemStyleData(height: 32),
       onChanged: isView ? null : (v) async {
         await bookingController.selectSite(v);
+        await _resolveReportToPool();
       },
     );
   }
@@ -670,7 +742,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
         bookingController.clearSelectedDateAndTime();
         dateController.clear();
         qtyPalletsController.clear();
-        setState(() {});
+        await _resolveReportToPool();
       },
     );
   }
