@@ -30,8 +30,15 @@ class BookingController extends ChangeNotifier {
 
   final Set<DateTime> bookableDates = {};
   final List<DateTime> availableStartTimes = [];
+  // Maps each available start time to the pool that provides it.
+  Map<DateTime, String> _startTimePoolMap = {};
   final Map<int, Map<String, bool>> _slotVisibilityByPool = {};
   Set<String> _currentEligiblePools = {};
+
+  /// The pool_id for the currently selected start time.
+  /// Null when no start time is selected or the pool mapping is unavailable.
+  String? get selectedPoolId =>
+      selectedStartTime != null ? _startTimePoolMap[selectedStartTime] : null;
 
   bool computingDates = false;
   bool computingTimes = false;
@@ -113,11 +120,22 @@ class BookingController extends ChangeNotifier {
 
     final from = startOfToday.subtract(const Duration(days: 1));
     final to = startOfToday.add(const Duration(days: AppConstants.bookingWindowDays));
-    final rows = await availabilityService.availabilityRows(
+
+    final rowsFuture = availabilityService.availabilityRows(
       siteId: selectedSite!,
       from: from,
       to: to,
     );
+    final poolConfigsFuture = availabilityService.fetchPoolConfigs(pools);
+    final dailyCountsFuture = availabilityService.fetchDailyBookingCounts(
+      poolIds: pools,
+      from: from,
+      to: to,
+    );
+
+    final rows = await rowsFuture;
+    final poolConfigs = await poolConfigsFuture;
+    final dailyCounts = await dailyCountsFuture;
 
     _slotVisibilityByPool.clear();
     for (final r in rows) {
@@ -134,6 +152,8 @@ class BookingController extends ChangeNotifier {
       rows: rows,
       allowedPools: pools,
       requiredSlots: selectedVehicleType.slotUnitsRequired,
+      poolConfigs: poolConfigs,
+      dailyBookingCounts: dailyCounts,
     );
 
     // 🔒 IMPORTANT: Ignore stale responses
@@ -206,7 +226,7 @@ class BookingController extends ChangeNotifier {
     }
 
 
-    final result = availabilityService.computeStartTimes(
+    final poolMap = availabilityService.computeStartTimes(
       rows: rows,
       allowedPools: pools,
       requiredSlots: selectedVehicleType.slotUnitsRequired,
@@ -216,9 +236,12 @@ class BookingController extends ChangeNotifier {
       return;
     }
 
+    _startTimePoolMap = poolMap;
+    final sortedTimes = poolMap.keys.toList()..sort();
+
     availableStartTimes
       ..clear()
-      ..addAll(result);
+      ..addAll(sortedTimes);
 
     if (selectedStartTime != null &&
         !availableStartTimes.contains(selectedStartTime)) {
@@ -236,9 +259,9 @@ class BookingController extends ChangeNotifier {
       final row = await supabase
           .from('bookings')
           .select(
-            'booking_id, customer_id, site_id, vehicle_type_id, start_time, '
-            'end_time, reference, carrier, vehicle_reg, container_number, '
-            'qty_pallets, qty_cases, booking_date, status'
+            'booking_id, customer_id, site_id, vehicle_type_id, pool_id, '
+            'start_time, end_time, reference, carrier, vehicle_reg, '
+            'container_number, qty_pallets, qty_cases, booking_date, status'
           )
           .eq('booking_id', bookingId)
           .single();
@@ -265,6 +288,12 @@ class BookingController extends ChangeNotifier {
 
       selectedStartTime = storedStart;
 
+      // Restore pool mapping so selectedPoolId is available during editing.
+      final restoredPoolId = row['pool_id']?.toString();
+      if (restoredPoolId != null) {
+        _startTimePoolMap = {storedStart: restoredPoolId};
+      }
+
       notifyListeners();
       _isHydrating = false;
 
@@ -285,6 +314,7 @@ class BookingController extends ChangeNotifier {
     selectedDate = null;
     selectedStartTime = null;
     availableStartTimes.clear();
+    _startTimePoolMap = {};
   }
 
   bool isSlotVisible(DateTime t) {
@@ -304,6 +334,12 @@ class BookingController extends ChangeNotifier {
   void clearSelectedDateAndTime() {
     _clearDateAndTime();
     notifyListeners();
+  }
+
+  /// Called during edit-mode hydration to seed the pool map for the
+  /// stored start time before computeStartTimes re-runs.
+  void restorePoolForTime(DateTime startTime, String poolId) {
+    _startTimePoolMap = {startTime: poolId};
   }
 }
 

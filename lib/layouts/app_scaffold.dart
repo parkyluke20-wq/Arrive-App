@@ -1,8 +1,12 @@
+import 'dart:html' as html;
+
 import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
 import '../services/user_session.dart';
+import '../services/version_notifier.dart';
 import '../theme/brand_colors.dart';
 import '../pages/booking_form_page.dart';
+import '../routing/app_routes.dart';
 
 class AppScaffold extends StatefulWidget {
   final String title;
@@ -24,6 +28,7 @@ class AppScaffold extends StatefulWidget {
 
 class _AppScaffoldState extends State<AppScaffold> {
   String? _effectiveRole;
+  bool _isGlobalAdmin = false;
   bool _loadingRole = true;
 
   @override
@@ -40,6 +45,9 @@ class _AppScaffoldState extends State<AppScaffold> {
 
     try {
       _effectiveRole = await UserSession.instance.getRole();
+      if (_effectiveRole == 'internal_admin') {
+        _isGlobalAdmin = await UserSession.instance.isGlobalAdmin();
+      }
     } catch (_) {
       // _effectiveRole stays null; role-gated nav items won't show
     } finally {
@@ -83,6 +91,12 @@ class _AppScaffoldState extends State<AppScaffold> {
             ),
 
             ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: const Text('Home'),
+              onTap: () => _go(context, AppRoutes.inboundOverview),
+            ),
+
+            ListTile(
               title: const Text('Make a Booking'),
               onTap: () {
                 Navigator.of(context).pop();
@@ -103,23 +117,38 @@ class _AppScaffoldState extends State<AppScaffold> {
                 _effectiveRole == 'internal_user')
               ListTile(
                 title: const Text('Make a Reservation'),
-                onTap: () => _go(context, '/reserve-slots'),
+                onTap: () => _go(context, AppRoutes.reserveSlots),
+              ),
+
+            if (_effectiveRole == 'internal_admin' ||
+                _effectiveRole == 'internal_user')
+              ListTile(
+                title: const Text('All Reservations'),
+                onTap: () => _go(context, AppRoutes.allReservations),
+              ),
+
+            if (_effectiveRole == 'internal_admin' ||
+                _effectiveRole == 'internal_user')
+              ListTile(
+                title: const Text('Manual Booking'),
+                onTap: () => _go(context, AppRoutes.manualBooking),
               ),
 
             ListTile(
-              title: const Text('Inbound Overview'),
-              onTap: () => _go(context, '/inbound-overview'),
-            ),
-
-            ListTile(
               title: const Text('All Bookings'),
-              onTap: () => _go(context, '/all-bookings'),
+              onTap: () => _go(context, AppRoutes.allBookings),
             ),
 
             ListTile(
               title: const Text('Profile'),
-              onTap: () => _go(context, '/profile'),
+              onTap: () => _go(context, AppRoutes.profile),
             ),
+
+            if (_isGlobalAdmin)
+              ListTile(
+                title: const Text('Settings'),
+                onTap: () => _go(context, AppRoutes.settings),
+              ),
 
             const Spacer(),
             const Divider(),
@@ -166,7 +195,36 @@ class _AppScaffoldState extends State<AppScaffold> {
         ),
       ),
 
-      body: widget.body,
+      body: Column(
+        children: [
+          ValueListenableBuilder<bool>(
+            valueListenable: newVersionAvailable,
+            builder: (context, hasNewVersion, _) {
+              if (!hasNewVersion) return const SizedBox.shrink();
+              return Container(
+                width: double.infinity,
+                color: Colors.amber,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'A new version is available',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => html.window.location.reload(),
+                      child: const Text('Update now'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          Expanded(child: widget.body),
+        ],
+      ),
 
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,

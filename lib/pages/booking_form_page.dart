@@ -214,11 +214,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
             .from('bookings')
             .select(
               'booking_id, booking_ref, customer_id, site_id, vehicle_type_id, '
-              'start_time, end_time, reference, carrier, vehicle_reg, '
+              'pool_id, start_time, end_time, reference, carrier, vehicle_reg, '
               'container_number, qty_pallets, qty_cases, booking_date, '
               'status, packing_list_path'
             )
-
             .eq('booking_id', editingBookingId!)
             .single();
 
@@ -256,6 +255,12 @@ class _BookingFormPageState extends State<BookingFormPage> {
           ..add(storedStart);
 
         bookingController.selectedStartTime = storedStart;
+
+        // Restore pool mapping so selectedPoolId is correct when saving.
+        final restoredPoolId = row['pool_id']?.toString();
+        if (restoredPoolId != null) {
+          bookingController.restorePoolForTime(storedStart, restoredPoolId);
+        }
 
         bookingController.notifyListeners();
 

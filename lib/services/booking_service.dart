@@ -26,6 +26,7 @@ class BookingService {
     required DateTime end,
     required String reference,
     required String carrier,
+    String? poolId,
     String? vehicleReg,
     String? container,
     int? qtyPallets,
@@ -35,6 +36,7 @@ class BookingService {
       'customer_id': controller.selectedCustomer,
       'site_id': controller.selectedSite,
       'vehicle_type_id': vehicleTypeId,
+      'pool_id': poolId,
 
       // ---- timing ----
       'start_time': start.toIso8601String(),
@@ -90,6 +92,7 @@ class BookingService {
       end: end,
       reference: reference,
       carrier: carrier,
+      poolId: controller.selectedPoolId,
       vehicleReg: vehicleReg,
       container: container,
       qtyPallets: qtyPallets,
@@ -162,6 +165,7 @@ class BookingService {
       end: end,
       reference: reference,
       carrier: carrier,
+      poolId: controller.selectedPoolId,
       vehicleReg: vehicleReg,
       container: container,
       qtyPallets: qtyPallets,

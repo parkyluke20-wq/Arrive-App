@@ -5,6 +5,9 @@ class AppRoutes {
   static const allBookings = '/all-bookings';
   static const profile = '/profile';
   static const reserveSlots = '/reserve-slots';
+  static const allReservations = '/all-reservations';
   static const inviteAccept = '/invite';
   static const resetPassword = '/reset-password';
+  static const settings = '/settings';
+  static const manualBooking = '/manual-booking';
 }

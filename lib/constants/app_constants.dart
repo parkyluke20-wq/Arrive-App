@@ -9,14 +9,14 @@ class AppConstants {
   static const int minAdvanceBookingHours = 24;
   static const Duration minAdvanceBooking = Duration(hours: minAdvanceBookingHours);
 
-  // Booking window: availability is fetched up to 60 days ahead
-  static const int bookingWindowDays = 60;
+  // Booking window: availability is fetched up to 183 days (~6 months) ahead
+  static const int bookingWindowDays = 183;
 
-  // Upper bound for the slot availability query; 22 slots × 60 days × 3 pools = 3,960 — 5,000 adds headroom
-  static const int maxSlotQueryLimit = 5000;
+  // Upper bound for the slot availability query; 22 slots × 183 days × 3 pools = 12,078 — 15,000 adds headroom
+  static const int maxSlotQueryLimit = 15000;
 
   // Maximum horizon for the date picker on the reserve-slots page
-  static const int maxBookingHorizonDays = 90;
+  static const int maxBookingHorizonDays = 183;
 
   // Session timeout
   static const Duration sessionTimeout = Duration(minutes: 240);

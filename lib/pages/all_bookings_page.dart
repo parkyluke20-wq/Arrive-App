@@ -12,6 +12,7 @@ import 'package:csv/csv.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import '../pages/booking_form_page.dart';
 import '../services/supabase_service.dart';
+import '../widgets/compact_date_range_picker.dart';
 
 class AllBookingsPage extends StatefulWidget {
   const AllBookingsPage({super.key});
@@ -301,49 +302,27 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     _applySorting();
   }
 
-  ThemeData _datePickerTheme(BuildContext context) {
-    return Theme.of(context).copyWith(
-      colorScheme: Theme.of(context).colorScheme.copyWith(
-        surface: BrandColors.background,
-        surfaceContainerHigh: BrandColors.background,
-      ),
-    );
+  String get _dateRangeLabel {
+    final fmt = DateFormat('dd/MM/yyyy');
+    if (_toDate == null) return 'From ${fmt.format(_fromDate)}';
+    return '${fmt.format(_fromDate)} — ${fmt.format(_toDate!)}';
   }
 
-  Future<void> _pickFromDate() async {
-    final picked = await showDatePicker(
+  Future<void> _pickDateRange() async {
+    final picked = await showDialog<DateTimeRange>(
       context: context,
-      initialDate: _fromDate,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-      builder: (context, child) => Theme(
-        data: _datePickerTheme(context),
-        child: child!,
+      builder: (_) => CompactDateRangePicker(
+        initialStart: _fromDate,
+        initialEnd: _toDate ?? DateTime.now(),
+        firstDate: DateTime(2000),
       ),
     );
-
-    if (picked != null) {
-      setState(() => _fromDate = picked);
-      _loadBookings();
-    }
-  }
-
-  Future<void> _pickToDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _toDate ?? DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-      builder: (context, child) => Theme(
-        data: _datePickerTheme(context),
-        child: child!,
-      ),
-    );
-
-    if (picked != null) {
-      setState(() => _toDate = picked);
-      _loadBookings();
-    }
+    if (picked == null) return;
+    setState(() {
+      _fromDate = picked.start;
+      _toDate = picked.end;
+    });
+    _loadBookings();
   }
 
   Future<void> _openCreateBooking() async {
@@ -696,8 +675,6 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   }
 
   Widget _buildHeaderActions() {
-    final dateFmt = DateFormat('dd/MM/yyyy');
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -897,21 +874,14 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
             const SizedBox(width: 24),
 
-            // ───────── DATE FROM ─────────
-            OutlinedButton(
-              onPressed: _pickFromDate,
-              child: Text('Date From: ${dateFmt.format(_fromDate)}'),
-            ),
-
-            const SizedBox(width: 16),
-
-            // ───────── DATE TO ─────────
-            OutlinedButton(
-              onPressed: _pickToDate,
-              child: Text(
-                _toDate == null
-                    ? 'Date To:'
-                    : 'Date To: ${dateFmt.format(_toDate!)}',
+            // ───────── DATE RANGE ─────────
+            OutlinedButton.icon(
+              onPressed: _pickDateRange,
+              icon: const Icon(Icons.date_range, size: 16),
+              label: Text(_dateRangeLabel),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: BrandColors.deepBlue,
+                side: const BorderSide(color: BrandColors.deepBlue),
               ),
             ),
 

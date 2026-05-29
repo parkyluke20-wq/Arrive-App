@@ -3,6 +3,21 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/app_constants.dart';
 import 'supabase_service.dart';
 
+class PoolDailyConfig {
+  final String poolId;
+  final String slotStrategy;
+  final int? maxBookingsPerDay;
+
+  const PoolDailyConfig({
+    required this.poolId,
+    required this.slotStrategy,
+    this.maxBookingsPerDay,
+  });
+
+  bool get hasWindowStrategy =>
+      slotStrategy == 'site_window' || slotStrategy == 'pool_window';
+}
+
 class BookingAvailabilityService {
   final SupabaseClient supabase;
 
@@ -67,6 +82,68 @@ class BookingAvailabilityService {
   }
 
   // ------------------------------------------------------------
+  // POOL DAILY CONFIGS
+  // ------------------------------------------------------------
+
+  Future<Map<String, PoolDailyConfig>> fetchPoolConfigs(
+    Set<String> poolIds,
+  ) async {
+    if (poolIds.isEmpty) return {};
+
+    final rows = await withRetry(() => supabase
+        .from('capacity_pools')
+        .select('pool_id, slot_strategy, max_bookings_per_day')
+        .inFilter('pool_id', poolIds.toList()));
+
+    final configs = <String, PoolDailyConfig>{};
+    for (final r in rows) {
+      final poolId = r['pool_id'].toString();
+      configs[poolId] = PoolDailyConfig(
+        poolId: poolId,
+        slotStrategy: (r['slot_strategy'] as String?) ?? '',
+        maxBookingsPerDay: r['max_bookings_per_day'] as int?,
+      );
+    }
+    return configs;
+  }
+
+  // ------------------------------------------------------------
+  // DAILY BOOKING COUNTS
+  // Counts non-cancelled, non-draft bookings per pool per day.
+  // Used to enforce max_bookings_per_day on window-strategy pools.
+  // Returns: poolId → day → count
+  // ------------------------------------------------------------
+
+  Future<Map<String, Map<DateTime, int>>> fetchDailyBookingCounts({
+    required Set<String> poolIds,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    if (poolIds.isEmpty) return {};
+
+    final rows = await withRetry(() => supabase
+        .from('bookings')
+        .select('pool_id, booking_date')
+        .inFilter('pool_id', poolIds.toList())
+        .neq('status', 'cancelled')
+        .neq('status', 'draft')
+        .gte('booking_date', from.toIso8601String())
+        .lt('booking_date', to.toIso8601String()));
+
+    final counts = <String, Map<DateTime, int>>{};
+    for (final r in rows) {
+      final poolId = r['pool_id']?.toString();
+      final rawDate = r['booking_date'];
+      if (poolId == null || rawDate == null) continue;
+      final date = DateTime.parse(rawDate.toString());
+      final day = DateTime(date.year, date.month, date.day);
+      counts.putIfAbsent(poolId, () => {})[day] =
+          (counts[poolId]![day] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  // ------------------------------------------------------------
   // COMPUTE BOOKABLE DAYS
   // ------------------------------------------------------------
 
@@ -74,6 +151,8 @@ class BookingAvailabilityService {
     required List<Map<String, dynamic>> rows,
     required Set<String> allowedPools,
     required int requiredSlots,
+    Map<String, PoolDailyConfig> poolConfigs = const {},
+    Map<String, Map<DateTime, int>> dailyBookingCounts = const {},
   }) {
     final DateTime minAllowed =
         DateTime.now().add(AppConstants.minAdvanceBooking);
@@ -108,7 +187,17 @@ class BookingAvailabilityService {
       bool dayBookable = false;
 
       for (final poolEntry in entry.value.entries) {
+        final poolId = poolEntry.key;
         final List<DateTime> originalSlots = poolEntry.value;
+
+        // Apply max_bookings_per_day for site_window / pool_window pools
+        final config = poolConfigs[poolId];
+        if (config != null &&
+            config.hasWindowStrategy &&
+            config.maxBookingsPerDay != null) {
+          final dayCount = (dailyBookingCounts[poolId] ?? {})[day] ?? 0;
+          if (dayCount >= config.maxBookingsPerDay!) continue;
+        }
 
         if (originalSlots.length < requiredSlots) continue;
 
@@ -152,9 +241,13 @@ class BookingAvailabilityService {
 
   // ------------------------------------------------------------
   // COMPUTE START TIMES
+  // Returns a map of valid start time → pool_id that provides it.
+  // When a time is available in multiple pools the first pool
+  // processed wins (putIfAbsent). Derive the sorted list from
+  // the map's keys in the caller.
   // ------------------------------------------------------------
 
-  List<DateTime> computeStartTimes({
+  Map<DateTime, String> computeStartTimes({
     required List<Map<String, dynamic>> rows,
     required Set<String> allowedPools,
     required int requiredSlots,
@@ -167,16 +260,14 @@ class BookingAvailabilityService {
       final poolId = r['pool_id'].toString();
       if (!allowedPools.contains(poolId)) continue;
 
-      final DateTime start =
-          DateTime.parse(r['slot_start']);
-
-      byPool.putIfAbsent(poolId, () => []);
-      byPool[poolId]!.add(start);
+      final DateTime start = DateTime.parse(r['slot_start']);
+      byPool.putIfAbsent(poolId, () => []).add(start);
     }
 
-    final Set<DateTime> starts = {};
+    final Map<DateTime, String> startPoolMap = {};
 
     for (final poolEntry in byPool.entries) {
+      final poolId = poolEntry.key;
       final List<DateTime> originalSlots = poolEntry.value;
       if (originalSlots.length < requiredSlots) continue;
 
@@ -186,32 +277,29 @@ class BookingAvailabilityService {
       List<DateTime> run = [];
 
       for (final DateTime s in slots) {
-        if (run.isEmpty ||
-            s.difference(run.last) ==
-                AppConstants.slotDuration) {
+        if (run.isEmpty || s.difference(run.last) == AppConstants.slotDuration) {
           run.add(s);
         } else {
-          _extractStarts(run, requiredSlots, starts);
+          _recordStarts(run, requiredSlots, poolId, startPoolMap);
           run = [s];
         }
       }
 
-      _extractStarts(run, requiredSlots, starts);
+      _recordStarts(run, requiredSlots, poolId, startPoolMap);
     }
 
-    final result = starts.toList()..sort();
-    return result;
+    return startPoolMap;
   }
 
-  void _extractStarts(
+  void _recordStarts(
     List<DateTime> run,
     int required,
-    Set<DateTime> out,
+    String poolId,
+    Map<DateTime, String> out,
   ) {
     if (run.length < required) return;
-
     for (int i = 0; i <= run.length - required; i++) {
-      out.add(run[i]);
+      out.putIfAbsent(run[i], () => poolId);
     }
   }
 }

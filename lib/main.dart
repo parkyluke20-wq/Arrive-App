@@ -9,6 +9,8 @@ import 'routing/app_routes.dart';
 import 'services/session_manager.dart';
 import 'services/supabase_service.dart';
 import 'services/user_session.dart';
+import 'services/version_check_service.dart';
+import 'services/version_notifier.dart';
 import 'theme/brand_colors.dart';
 
 // APP PAGES
@@ -17,6 +19,9 @@ import 'pages/booking_form_page.dart';
 import 'pages/all_bookings_page.dart';
 import 'pages/profile_page.dart';
 import 'pages/reserve_slots_page.dart';
+import 'pages/all_reservations_page.dart';
+import 'pages/settings_page.dart';
+import 'pages/manual_booking_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,11 +45,22 @@ class InboundBookingApp extends StatefulWidget {
 
 class _InboundBookingAppState extends State<InboundBookingApp> {
   final sessionManager = SessionManager();
+  late final VersionCheckService _versionCheckService;
 
   @override
   void initState() {
     super.initState();
     _startSession();
+    _versionCheckService = VersionCheckService(
+      onNewVersionAvailable: () => newVersionAvailable.value = true,
+    );
+    _versionCheckService.init();
+  }
+
+  @override
+  void dispose() {
+    _versionCheckService.dispose();
+    super.dispose();
   }
 
   void _startSession() {
@@ -122,6 +138,9 @@ class _InboundBookingAppState extends State<InboundBookingApp> {
           AppRoutes.allBookings: (_) => const AllBookingsPage(),
           AppRoutes.profile: (_) => const ProfilePage(),
           AppRoutes.reserveSlots: (_) => const ReserveSlotsPage(),
+          AppRoutes.allReservations: (_) => const AllReservationsPage(),
+          AppRoutes.settings: (_) => const SettingsPage(),
+          AppRoutes.manualBooking: (_) => const ManualBookingPage(),
           AppRoutes.inviteAccept: (_) => const InviteAcceptPage(),
         },
       ),
