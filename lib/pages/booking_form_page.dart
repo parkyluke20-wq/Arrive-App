@@ -72,10 +72,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
   final qtyPalletsController = TextEditingController();
   final dateController = TextEditingController();
   final _commentController = TextEditingController();
+  final _customerSearchCtrl = TextEditingController();
 
-  PlatformFile? packingListFile;
-  String? existingPackingListPath;
-  bool packingListRemoved = false;
+  List<PlatformFile> _packingListFiles = [];
+  bool _hasExistingPackingLists = false;
   Key _packingListKey = UniqueKey();
   String? editingBookingId;
   String? _bookingRef;
@@ -215,16 +215,19 @@ class _BookingFormPageState extends State<BookingFormPage> {
             .select(
               'booking_id, booking_ref, customer_id, site_id, vehicle_type_id, '
               'pool_id, start_time, end_time, reference, carrier, vehicle_reg, '
-              'container_number, qty_pallets, qty_cases, booking_date, '
-              'status, packing_list_path'
+              'container_number, qty_pallets, qty_cases, booking_date, status'
             )
             .eq('booking_id', editingBookingId!)
             .single();
 
-        // ---- restore packing list state ----
-        existingPackingListPath = row['packing_list_path'];
-        packingListRemoved = false;
-        packingListFile = null;
+        // ---- check for existing packing lists ----
+        final existingPLs = await supabase
+            .from('booking_packing_lists')
+            .select('id')
+            .eq('booking_id', editingBookingId!)
+            .limit(1);
+        _hasExistingPackingLists = existingPLs.isNotEmpty;
+        _packingListFiles = [];
         bookingStatus = row['status'];
         _bookingRef = row['booking_ref']?.toString();
 
@@ -469,10 +472,14 @@ class _BookingFormPageState extends State<BookingFormPage> {
                         flex: 3,
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 900),
-                          child: SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
@@ -584,12 +591,11 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                     Expanded(
                                       child: PackingListWidget(
                                         key: _packingListKey,
-                                        initialExistingPath: existingPackingListPath,
+                                        bookingId: editingBookingId,
                                         isView: isView,
                                         supabase: supabase,
-                                        onChanged: (file, removed) => setState(() {
-                                          packingListFile = file;
-                                          packingListRemoved = removed;
+                                        onChanged: (files) => setState(() {
+                                          _packingListFiles = files;
                                         }),
                                       ),
                                     ),
@@ -606,13 +612,14 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                   ),
                                 ],
 
-                                const SizedBox(height: 32),
-
-                                _actionButtons(),
-
-                                const SizedBox(height: 24),
-                              ],
-                            ),
+                                const SizedBox(height: 16),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              _actionButtons(),
+                              const SizedBox(height: 16),
+                            ],
                           ),
                         ),
                       ),
@@ -681,20 +688,53 @@ class _BookingFormPageState extends State<BookingFormPage> {
       isExpanded: true,
       value: bookingController.selectedCustomer,
       decoration: _denseDecoration('Customer *'),
+      dropdownSearchData: DropdownSearchData(
+        searchController: _customerSearchCtrl,
+        searchInnerWidgetHeight: 52,
+        searchInnerWidget: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+          child: TextField(
+            controller: _customerSearchCtrl,
+            autofocus: true,
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding:
+                  EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              hintText: 'Search...',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        searchMatchFn: (item, searchValue) {
+          final customer = customers.firstWhere(
+            (c) => c.customerId == item.value,
+            orElse: () => CustomerOption(customerId: -1, name: ''),
+          );
+          return customer.name
+              .toLowerCase()
+              .contains(searchValue.toLowerCase());
+        },
+      ),
+      onMenuStateChange: (isOpen) {
+        if (!isOpen) _customerSearchCtrl.clear();
+      },
       items: customers
           .map((c) => DropdownMenuItem(
                 value: c.customerId,
                 child: Text(c.name, style: const TextStyle(fontSize: 13)),
               ))
           .toList(),
-      dropdownStyleData: const DropdownStyleData(maxHeight: 260, decoration: BoxDecoration(color: BrandColors.background)),
-      menuItemStyleData: const MenuItemStyleData(height: 32),
+      dropdownStyleData: const DropdownStyleData(
+        maxHeight: 320,
+        decoration: BoxDecoration(color: BrandColors.background),
+      ),
+      menuItemStyleData: const MenuItemStyleData(height: 36),
       onChanged: isView ? null : (v) async {
         await bookingController.selectCustomer(v);
         sites.clear();
         dateController.clear();
-        packingListFile = null;
-        packingListRemoved = false;
+        _packingListFiles = [];
+        _hasExistingPackingLists = false;
         _packingListKey = UniqueKey();
         _reportToPool = null;
         if (v != null) {
@@ -939,17 +979,15 @@ class _BookingFormPageState extends State<BookingFormPage> {
     if (qty > 9999) {return 'Quantity cannot exceed 9999';}
 
     // ---- packing list validation ----
-    final hasExisting =existingPackingListPath != null && !packingListRemoved;
-    final hasNew = packingListFile != null;
-    if (!hasExisting && !hasNew) {return 'Packing list is required';}
+    if (!_hasExistingPackingLists && _packingListFiles.isEmpty) {
+      return 'Packing list is required';
+    }
     return null;
   }
 
   bool _canConfirmBooking() {
     final qty = int.tryParse(qtyPalletsController.text);
     final hasQty = qty != null && qty > 0;
-    final hasExisting = existingPackingListPath != null && !packingListRemoved;
-    final hasNew = packingListFile != null;
 
     return bookingController.selectedCustomer != null &&
         bookingController.selectedSite != null &&
@@ -959,7 +997,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
         referenceController.text.trim().isNotEmpty &&
         carrierController.text.trim().isNotEmpty &&
         hasQty &&
-        (hasExisting || hasNew);
+        (_hasExistingPackingLists || _packingListFiles.isNotEmpty);
   }
 
   Future<String?> _checkCustomerDailyQuota() async {
@@ -1268,9 +1306,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                         qtyPalletsController.text.isNotEmpty
                                     ? int.parse(qtyPalletsController.text)
                                     : null,
-                            packingListFile: packingListFile,
-                            existingPackingListPath: existingPackingListPath,
-                            packingListRemoved: packingListRemoved,
+                            packingListFiles: _packingListFiles,
                           );
                           final bookingRef = booking['booking_ref'];
 
@@ -1350,6 +1386,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
     qtyPalletsController.dispose();
     dateController.dispose();
     _commentController.dispose();
+    _customerSearchCtrl.dispose();
     super.dispose();
   }
 }

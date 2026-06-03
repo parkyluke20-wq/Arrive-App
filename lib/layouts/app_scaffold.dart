@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
 import '../services/user_session.dart';
 import '../services/version_notifier.dart';
+import '../services/notification_provider.dart';
 import '../theme/brand_colors.dart';
 import '../pages/booking_form_page.dart';
 import '../routing/app_routes.dart';
+import '../widgets/notification_panel.dart';
 
 class AppScaffold extends StatefulWidget {
   final String title;
@@ -30,11 +32,17 @@ class _AppScaffoldState extends State<AppScaffold> {
   String? _effectiveRole;
   bool _isGlobalAdmin = false;
   bool _loadingRole = true;
+  OverlayEntry? _notificationOverlay;
 
   @override
   void initState() {
     super.initState();
     _loadRole();
+    NotificationProvider.instance.addListener(_onNotificationsChanged);
+  }
+
+  void _onNotificationsChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadRole() async {
@@ -55,6 +63,13 @@ class _AppScaffoldState extends State<AppScaffold> {
     }
   }
 
+  @override
+  void dispose() {
+    _removeNotificationOverlay();
+    NotificationProvider.instance.removeListener(_onNotificationsChanged);
+    super.dispose();
+  }
+
   Future<void> _logout(BuildContext context) async {
     UserSession.instance.clear();
     await supabase.auth.signOut();
@@ -69,6 +84,106 @@ class _AppScaffoldState extends State<AppScaffold> {
     Navigator.of(context).pushNamedAndRemoveUntil(
       route,
       (route) => false,
+    );
+  }
+
+  void _removeNotificationOverlay() {
+    _notificationOverlay?.remove();
+    _notificationOverlay = null;
+  }
+
+  void _toggleNotificationDropdown(BuildContext context) {
+    if (_notificationOverlay != null) {
+      _removeNotificationOverlay();
+      setState(() {});
+      return;
+    }
+
+    const dropdownWidth = 360.0;
+    const appBarHeight = 90.0;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final rightOffset = screenWidth < dropdownWidth + 16 ? 0.0 : 16.0;
+
+    _notificationOverlay = OverlayEntry(
+      builder: (ctx) => Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () {
+                _removeNotificationOverlay();
+                setState(() {});
+              },
+            ),
+          ),
+          Positioned(
+            top: appBarHeight + 6,
+            right: rightOffset,
+            width: dropdownWidth.clamp(0, screenWidth.toDouble()),
+            child: Material(
+              elevation: 8,
+              borderRadius: BorderRadius.circular(12),
+              color: BrandColors.background,
+              child: SizedBox(
+                height: 440,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: NotificationPanel(
+                    onDismiss: () {
+                      _removeNotificationOverlay();
+                      setState(() {});
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    Overlay.of(context).insert(_notificationOverlay!);
+    setState(() {});
+  }
+
+  Widget _buildNotificationBell(BuildContext context) {
+    final unread = NotificationProvider.instance.unreadCount;
+    final isOpen = _notificationOverlay != null;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          icon: Icon(
+            isOpen ? Icons.notifications : Icons.notifications_none,
+            color: Colors.white,
+            size: 28,
+          ),
+          onPressed: () => _toggleNotificationDropdown(context),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+        ),
+        if (unread > 0)
+          Positioned(
+            right: 6,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(
+                color: BrandColors.orange,
+                shape: BoxShape.circle,
+              ),
+              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+              child: Text(
+                unread > 99 ? '99+' : '$unread',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -182,6 +297,8 @@ class _AppScaffoldState extends State<AppScaffold> {
           ),
           title: Text(widget.title),
           actions: [
+            _buildNotificationBell(context),
+            const SizedBox(width: 24),
             Padding(
               padding: const EdgeInsets.only(right: 24, top: 10),
               child: Center(

@@ -67,6 +67,7 @@ class _ProfilePageState extends State<ProfilePage> {
   final TextEditingController newPasswordController = TextEditingController();
   final TextEditingController confirmPasswordController =
       TextEditingController();
+  final TextEditingController _customerSearchCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -600,6 +601,36 @@ class _ProfilePageState extends State<ProfilePage> {
                             isExpanded: true,
                             value: selectedCustomerId,
                             decoration: _denseDecoration('Customer'),
+                            dropdownSearchData: DropdownSearchData(
+                              searchController: _customerSearchCtrl,
+                              searchInnerWidgetHeight: 52,
+                              searchInnerWidget: Padding(
+                                padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                                child: TextField(
+                                  controller: _customerSearchCtrl,
+                                  autofocus: true,
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 8),
+                                    hintText: 'Search...',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              searchMatchFn: (item, searchValue) {
+                                final customer = customers.firstWhere(
+                                  (c) => c['customer_id'] == item.value,
+                                  orElse: () => {'customer_name': ''},
+                                );
+                                return (customer['customer_name'] as String)
+                                    .toLowerCase()
+                                    .contains(searchValue.toLowerCase());
+                              },
+                            ),
+                            onMenuStateChange: (isOpen) {
+                              if (!isOpen) _customerSearchCtrl.clear();
+                            },
                             items: customers
                                 .map(
                                   (c) => DropdownMenuItem<int>(
@@ -613,10 +644,12 @@ class _ProfilePageState extends State<ProfilePage> {
                                 )
                                 .toList(),
                             dropdownStyleData: const DropdownStyleData(
-                              maxHeight: 260,
-                              decoration: BoxDecoration(color: BrandColors.background),
+                              maxHeight: 320,
+                              decoration:
+                                  BoxDecoration(color: BrandColors.background),
                             ),
-                            menuItemStyleData: const MenuItemStyleData(height: 32),
+                            menuItemStyleData:
+                                const MenuItemStyleData(height: 36),
                             onChanged: (value) async {
                               setState(() => selectedCustomerId = value);
                               await _loadMembers();
@@ -686,6 +719,7 @@ class _ProfilePageState extends State<ProfilePage> {
   void dispose() {
     newPasswordController.dispose();
     confirmPasswordController.dispose();
+    _customerSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -725,11 +759,13 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
   void dispose() {
     nameController.dispose();
     emailController.dispose();
+    _customerSearchCtrl.dispose();
     super.dispose();
   }
   List<Map<String, dynamic>> sites = [];
   final nameController = TextEditingController();
   final emailController = TextEditingController();
+  final _customerSearchCtrl = TextEditingController();
 
   UserType? selectedType;
   int? selectedCustomerId;
@@ -825,9 +861,40 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                   decoration: const InputDecoration(
                     labelText: 'Customer',
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                    contentPadding: EdgeInsets.symmetric(
+                        vertical: 18, horizontal: 12),
                     border: OutlineInputBorder(),
                   ),
+                  dropdownSearchData: DropdownSearchData(
+                    searchController: _customerSearchCtrl,
+                    searchInnerWidgetHeight: 52,
+                    searchInnerWidget: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                      child: TextField(
+                        controller: _customerSearchCtrl,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                          hintText: 'Search...',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    searchMatchFn: (item, searchValue) {
+                      final customer = widget.customers.firstWhere(
+                        (c) => c['customer_id'] == item.value,
+                        orElse: () => {'customer_name': ''},
+                      );
+                      return (customer['customer_name'] as String)
+                          .toLowerCase()
+                          .contains(searchValue.toLowerCase());
+                    },
+                  ),
+                  onMenuStateChange: (isOpen) {
+                    if (!isOpen) _customerSearchCtrl.clear();
+                  },
                   items: widget.customers
                       .map((c) => DropdownMenuItem<int>(
                             value: c['customer_id'],
@@ -838,12 +905,11 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
                           ))
                       .toList(),
                   dropdownStyleData: const DropdownStyleData(
-                    maxHeight: 260,
-                    decoration: BoxDecoration(color: BrandColors.background),
+                    maxHeight: 320,
+                    decoration:
+                        BoxDecoration(color: BrandColors.background),
                   ),
-                  menuItemStyleData: const MenuItemStyleData(
-                    height: 32,
-                  ),
+                  menuItemStyleData: const MenuItemStyleData(height: 36),
                   onChanged: (v) => setState(() => selectedCustomerId = v),
                 ),
               const SizedBox(height: 20),

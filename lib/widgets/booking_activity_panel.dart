@@ -109,6 +109,7 @@ class BookingActivityPanelState extends State<BookingActivityPanel> {
         'event_type': 'comment_added',
         'user_id': user.id,
         'audit_text': comment,
+        'added_post_booking': true,
       });
 
       _refreshEventsPanel();

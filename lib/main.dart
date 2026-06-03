@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
@@ -11,6 +13,8 @@ import 'services/supabase_service.dart';
 import 'services/user_session.dart';
 import 'services/version_check_service.dart';
 import 'services/version_notifier.dart';
+import 'services/notification_service.dart';
+import 'services/notification_provider.dart';
 import 'theme/brand_colors.dart';
 
 // APP PAGES
@@ -43,24 +47,55 @@ class InboundBookingApp extends StatefulWidget {
   State<InboundBookingApp> createState() => _InboundBookingAppState();
 }
 
-class _InboundBookingAppState extends State<InboundBookingApp> {
+class _InboundBookingAppState extends State<InboundBookingApp>
+    with WidgetsBindingObserver {
   final sessionManager = SessionManager();
   late final VersionCheckService _versionCheckService;
+  late final StreamSubscription<AuthState> _authSubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startSession();
     _versionCheckService = VersionCheckService(
       onNewVersionAvailable: () => newVersionAvailable.value = true,
     );
     _versionCheckService.init();
+
+    _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.signedIn) {
+        NotificationService.instance.start();
+      } else if (data.event == AuthChangeEvent.signedOut) {
+        NotificationService.instance.stop();
+        NotificationProvider.instance.clear();
+      }
+    });
+
+    if (supabase.auth.currentSession != null) {
+      NotificationService.instance.start();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _authSubscription.cancel();
+    NotificationService.instance.stop();
     _versionCheckService.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      NotificationService.instance.stop();
+    } else if (state == AppLifecycleState.resumed) {
+      if (supabase.auth.currentSession != null) {
+        NotificationService.instance.start();
+      }
+    }
   }
 
   void _startSession() {

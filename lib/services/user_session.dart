@@ -31,5 +31,16 @@ class UserSession {
     return rows.isNotEmpty;
   }
 
+  Future<bool> isGlobalScope() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+    final rows = await supabase
+        .from('user_roles')
+        .select('scope_type')
+        .eq('user_id', user.id)
+        .eq('scope_type', 'global');
+    return rows.isNotEmpty;
+  }
+
   void clear() => _role = null;
 }

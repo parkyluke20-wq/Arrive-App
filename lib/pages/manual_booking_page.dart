@@ -70,7 +70,7 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
   String? _poolError;
 
   // Packing list
-  PlatformFile? _packingListFile;
+  List<PlatformFile> _packingListFiles = [];
   Key _packingListKey = UniqueKey();
 
   // Submit state
@@ -329,23 +329,24 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
 
       insertedBookingId = row['booking_id'].toString();
 
-      // Upload packing list
-      final file = _packingListFile!;
-      final ext = file.name.split('.').last;
-      final storagePath = 'booking_$insertedBookingId.$ext';
+      // Upload packing list files
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      for (int i = 0; i < _packingListFiles.length; i++) {
+        final file = _packingListFiles[i];
+        final storagePath =
+            'booking_${insertedBookingId}_${ts + i}_${file.name}';
 
-      await supabase.storage
-          .from('booking-documents')
-          .uploadBinary(
-            storagePath,
-            file.bytes!,
-            fileOptions: const FileOptions(upsert: true),
-          );
+        await supabase.storage
+            .from('booking-documents')
+            .uploadBinary(storagePath, file.bytes!);
 
-      await supabase
-          .from('bookings')
-          .update({'packing_list_path': storagePath})
-          .eq('booking_id', insertedBookingId);
+        await supabase.from('booking_packing_lists').insert({
+          'booking_id': insertedBookingId,
+          'storage_path': storagePath,
+          'file_name': file.name,
+          'uploaded_by': user.id,
+        });
+      }
 
       if (!mounted) return null;
 
@@ -378,7 +379,7 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
       _startTime != null &&
       _carrierCtrl.text.trim().isNotEmpty &&
       _referenceCtrl.text.trim().isNotEmpty &&
-      _packingListFile != null &&
+      _packingListFiles.isNotEmpty &&
       !_resolvingPool &&
       _poolError == null;
 
@@ -451,7 +452,7 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
       _resolvingPool = false;
       _submitting = false;
       _submitError = null;
-      _packingListFile = null;
+      _packingListFiles = [];
       _packingListKey = UniqueKey();
     });
   }
@@ -594,11 +595,10 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
                     // Packing list
                     PackingListWidget(
                       key: _packingListKey,
-                      initialExistingPath: null,
                       isView: false,
                       supabase: supabase,
-                      onChanged: (file, removed) =>
-                          setState(() => _packingListFile = file),
+                      onChanged: (files) =>
+                          setState(() => _packingListFiles = files),
                     ),
 
                     const SizedBox(height: 24),

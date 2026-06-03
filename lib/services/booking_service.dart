@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -130,9 +129,7 @@ class BookingService {
     String? container,
     int? qtyPallets,
     int? qtyCases,
-    PlatformFile? packingListFile,
-    String? existingPackingListPath,
-    required bool packingListRemoved,
+    required List<PlatformFile> packingListFiles,
   }) async {
     if (controller.selectedStartTime == null) {
       throw Exception('Start time is required');
@@ -208,47 +205,29 @@ class BookingService {
       }
 
       // ---------- PACKING LIST LOGIC ----------
-      if (packingListFile != null) {
+      if (packingListFiles.isNotEmpty) {
+        final user = supabase.auth.currentUser;
+        if (user == null) throw Exception('User not authenticated');
 
-        final extension =
-            packingListFile.name.split('.').last;
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        for (int i = 0; i < packingListFiles.length; i++) {
+          final file = packingListFiles[i];
+          final storagePath =
+              'booking_${resolvedBookingId}_${ts + i}_${file.name}';
 
-        final storagePath =
-            'booking_$resolvedBookingId.$extension';
+          await supabase.storage
+              .from('booking-documents')
+              .uploadBinary(storagePath, file.bytes!);
 
-        await supabase.storage
-            .from('booking-documents')
-            .uploadBinary(
-              storagePath,
-              packingListFile.bytes!,
-              fileOptions: const FileOptions(
-                upsert: true,
-              ),
-            );
-
-        await supabase
-            .from('bookings')
-            .update({
-              'packing_list_path': storagePath,
-            })
-            .eq('booking_id', resolvedBookingId);
-
-      } 
-      else if (packingListRemoved &&
-          existingPackingListPath != null) {
-
-        await supabase.storage
-            .from('booking-documents')
-            .remove([existingPackingListPath]);
-
-        await supabase
-            .from('bookings')
-            .update({
-              'packing_list_path': null,
-            })
-            .eq('booking_id', resolvedBookingId)
-            .select();
+          await supabase.from('booking_packing_lists').insert({
+            'booking_id': resolvedBookingId,
+            'storage_path': storagePath,
+            'file_name': file.name,
+            'uploaded_by': user.id,
+          });
+        }
       }
+
     if (bookingRow == null) {
       throw Exception('Booking row not returned');
     }

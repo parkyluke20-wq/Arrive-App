@@ -45,6 +45,9 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   String? _sortColumn;
   bool _sortAscending = true;
   String? _effectiveRole;
+  bool _isGlobalScope = false;
+  String _siteFilter = 'all';
+  List<String> _siteOptions = ['all'];
   String _formatStatus(String? status) {
     if (status == null) return '—';
     switch (status) {
@@ -91,11 +94,15 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       var query = supabase
         .from('bookings')
         .select(
-          'booking_id,booking_ref,start_time,reference,status,packing_list_path,vehicle_types(name),customers!inner(customer_code),sites(site_name),qty_cases,qty_pallets',
+          'booking_id,booking_ref,start_time,reference,status,vehicle_types(name),customers!inner(customer_code),sites(site_name),qty_cases,qty_pallets',
         );
 
       if (!_statusFilter.contains('all')) {
         query = query.inFilter('status', _statusFilter);
+      }
+
+      if (_siteFilter != 'all') {
+        query = query.eq('sites.site_name', _siteFilter);
       }
 
       if (!_customerFilter.contains('all')) {
@@ -131,9 +138,20 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
           .toList()
         ..sort();
 
+      final sitesInBookings = bookings
+          .map((b) => b['sites']?['site_name'] as String?)
+          .where((s) => s != null && s.isNotEmpty)
+          .cast<String>()
+          .toSet()
+          .toList()
+        ..sort();
+
       setState(() {
         _allBookings = bookings;
         _applyReferenceSearch();
+        if (_siteFilter == 'all') {
+          _siteOptions = ['all', ...sitesInBookings];
+        }
         if (customersInBookings.length == 1) {
           // Only one customer available → hard lock to it
           _customerOptions = customersInBookings;
@@ -418,27 +436,14 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
     await _loadBookings();
   }
 
-  Future<void> _downloadPackingList(String? path) async {
-    if (path == null || path.isEmpty) return;
-    if (!kIsWeb) return;
-
-    try {
-      final signedUrl = await supabase.storage
-          .from('booking-documents')
-          .createSignedUrl(path, 60);
-
-      final uri = Uri.parse(signedUrl);
-
-      final anchor = html.AnchorElement(href: uri.toString())
-        ..setAttribute('download', '')
-        ..click();
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Download failed: $e')),
-      );
-    }
+  void _showPackingListsDialog(String bookingId, String? bookingRef) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _PackingListsDialog(
+        bookingId: bookingId,
+        bookingRef: bookingRef,
+      ),
+    );
   }
 
   Future<void> _loadUserRole() async {
@@ -449,9 +454,11 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
 
     try {
       final role = await UserSession.instance.getRole();
+      final globalScope = await UserSession.instance.isGlobalScope();
 
       if (mounted) setState(() {
         _effectiveRole = role;
+        _isGlobalScope = globalScope;
       });
 
       await _loadBookings();
@@ -780,6 +787,57 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
             ),
 
             const SizedBox(width: 24),
+
+            // ───────── SITE FILTER (global scope users only) ─────────
+            if (_isGlobalScope) ...[
+              const Text(
+                'Site:',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 200,
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton2<String>(
+                    isExpanded: true,
+                    hint: Text(
+                      _siteFilter == 'all' ? 'All' : _siteFilter,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    buttonStyleData: const ButtonStyleData(
+                      height: 36,
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                    dropdownStyleData: const DropdownStyleData(
+                      maxHeight: 300,
+                      decoration:
+                          BoxDecoration(color: BrandColors.background),
+                    ),
+                    menuItemStyleData:
+                        const MenuItemStyleData(height: 32),
+                    value: _siteFilter,
+                    items: _siteOptions
+                        .map((site) => DropdownMenuItem<String>(
+                              value: site,
+                              child: Text(
+                                site == 'all' ? 'All' : site,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() {
+                        _siteFilter = v;
+                        _customerFilter = ['all'];
+                      });
+                      _loadBookings();
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(width: 24),
+            ],
 
             // ───────── CUSTOMER FILTER ─────────
             const Text(
@@ -1181,24 +1239,21 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                                       ),
                                     ),
 
-                                  // DOWNLOAD
-                                  if (booking['status'] != 'cancelled' &&
-                                      booking['packing_list_path'] != null &&
-                                      booking['packing_list_path']
-                                          .toString()
-                                          .isNotEmpty)
+                                  // PACKING LISTS
+                                  if (booking['status'] != 'cancelled')
                                     Tooltip(
-                                      message: 'Download Packing List',
+                                      message: 'View Packing Lists',
                                       child: IconButton(
-                                        icon: const Icon(Icons.download),
+                                        icon: const Icon(Icons.folder_open),
                                         color: BrandColors.green,
                                         padding: EdgeInsets.zero,
                                         constraints: const BoxConstraints(
                                           minWidth: 28,
                                           minHeight: 28,
                                         ),
-                                        onPressed: () => _downloadPackingList(
-                                          booking['packing_list_path'],
+                                        onPressed: () => _showPackingListsDialog(
+                                          booking['booking_id'].toString(),
+                                          booking['booking_ref']?.toString(),
                                         ),
                                       ),
                                     ),
@@ -1248,6 +1303,108 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PackingListsDialog extends StatefulWidget {
+  final String bookingId;
+  final String? bookingRef;
+
+  const _PackingListsDialog({
+    required this.bookingId,
+    required this.bookingRef,
+  });
+
+  @override
+  State<_PackingListsDialog> createState() => _PackingListsDialogState();
+}
+
+class _PackingListsDialogState extends State<_PackingListsDialog> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _files = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final rows = await supabase
+          .from('booking_packing_lists')
+          .select('id, storage_path, file_name, uploaded_at')
+          .eq('booking_id', widget.bookingId)
+          .order('uploaded_at');
+      if (mounted) {
+        setState(() {
+          _files = List<Map<String, dynamic>>.from(rows);
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _download(Map<String, dynamic> row) async {
+    try {
+      final signedUrl = await supabase.storage
+          .from('booking-documents')
+          .createSignedUrl(row['storage_path'] as String, 60);
+      (html.AnchorElement(href: signedUrl)
+        ..setAttribute('download', row['file_name'] as String? ?? ''))
+        .click();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.bookingRef != null
+        ? 'Packing Lists — ${widget.bookingRef}'
+        : 'Packing Lists';
+
+    return AlertDialog(
+      backgroundColor: BrandColors.background,
+      title: Text(title),
+      content: SizedBox(
+        width: 400,
+        child: _loading
+            ? const SizedBox(
+                height: 60,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            : _files.isEmpty
+                ? const Text('No packing lists found for this booking.')
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: _files
+                        .map(
+                          (f) => ListTile(
+                            leading: const Icon(Icons.insert_drive_file),
+                            title: Text(f['file_name'] as String? ?? '—'),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.download),
+                              onPressed: () => _download(f),
+                              tooltip: 'Download',
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
     );
   }
 }

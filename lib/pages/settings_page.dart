@@ -399,21 +399,35 @@ class _CustomersTabState extends State<_CustomersTab> {
                 label: const Text('Add Customer'),
                 onPressed: () => _openModal(),
               ),
-              DropdownButton<String>(
-                value: _filterStatus,
-                items: const [
-                  DropdownMenuItem(value: 'all', child: Text('All')),
-                  DropdownMenuItem(value: 'active', child: Text('Active only')),
-                  DropdownMenuItem(
-                      value: 'inactive', child: Text('Inactive only')),
-                ],
-                onChanged: (v) {
-                  if (v == null) return;
-                  setState(() {
-                    _filterStatus = v;
-                    _applyFilters();
-                  });
-                },
+              SizedBox(
+                width: 180,
+                child: DropdownButtonFormField2<String>(
+                  isExpanded: true,
+                  value: _filterStatus,
+                  decoration: _fieldDecoration('Status'),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 200,
+                    decoration:
+                        BoxDecoration(color: BrandColors.background),
+                  ),
+                  menuItemStyleData:
+                      const MenuItemStyleData(height: 32),
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'all', child: Text('All statuses')),
+                    DropdownMenuItem(
+                        value: 'active', child: Text('Active only')),
+                    DropdownMenuItem(
+                        value: 'inactive', child: Text('Inactive only')),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() {
+                      _filterStatus = v;
+                      _applyFilters();
+                    });
+                  },
+                ),
               ),
               SizedBox(
                 width: 260,
@@ -1246,11 +1260,11 @@ class _PoolsTabState extends State<_PoolsTab> {
 
     const double actionW = 80;
     const double displayNameW = 180;
-    const double poolNameW = 160;
+    const double poolNameW = 250;
     const double siteW = 140;
     const double loadTypeW = 100;
     const double strategyW = 130;
-    const double priorityW = 70;
+    const double priorityW = 95;
     const double activeW = 80;
     const double maxBookW = 90;
     const double bankHolW = 80;
@@ -1287,63 +1301,110 @@ class _PoolsTabState extends State<_PoolsTab> {
                 label: const Text('Add Pool'),
                 onPressed: () => _openModal(),
               ),
-              DropdownButton<String>(
-                value: _filterSite,
-                items: _siteOptions
-                    .map((s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(s == 'all' ? 'All sites' : s)))
-                    .toList(),
-                onChanged: (v) {
-                  if (v == null) return;
-                  setState(() {
-                    _filterSite = v;
-                    _applyFilters();
-                  });
-                },
+              SizedBox(
+                width: 180,
+                child: DropdownButtonFormField2<String>(
+                  isExpanded: true,
+                  value: _filterSite,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    border: OutlineInputBorder(),
+                  ),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 300,
+                    decoration:
+                        BoxDecoration(color: BrandColors.background),
+                  ),
+                  menuItemStyleData:
+                      const MenuItemStyleData(height: 32),
+                  items: _siteOptions
+                      .map((s) => DropdownMenuItem(
+                          value: s,
+                          child: Text(s == 'all' ? 'All sites' : s)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() {
+                      _filterSite = v;
+                      _applyFilters();
+                    });
+                  },
+                ),
               ),
-              DropdownButton<String>(
-                value: _filterActive,
-                items: const [
-                  DropdownMenuItem(value: 'all', child: Text('All')),
-                  DropdownMenuItem(
-                      value: 'active', child: Text('Active only')),
-                  DropdownMenuItem(
-                      value: 'inactive', child: Text('Inactive only')),
-                ],
-                onChanged: (v) {
-                  if (v == null) return;
-                  setState(() {
-                    _filterActive = v;
-                    _applyFilters();
-                  });
-                },
+              SizedBox(
+                width: 160,
+                child: DropdownButtonFormField2<String>(
+                  isExpanded: true,
+                  value: _filterActive,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    border: OutlineInputBorder(),
+                  ),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 200,
+                    decoration:
+                        BoxDecoration(color: BrandColors.background),
+                  ),
+                  menuItemStyleData:
+                      const MenuItemStyleData(height: 32),
+                  items: const [
+                    DropdownMenuItem(value: 'all', child: Text('All')),
+                    DropdownMenuItem(
+                        value: 'active', child: Text('Active only')),
+                    DropdownMenuItem(
+                        value: 'inactive', child: Text('Inactive only')),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() {
+                      _filterActive = v;
+                      _applyFilters();
+                    });
+                  },
+                ),
               ),
-              DropdownButton<String>(
-                value: _filterStrategy,
-                items: const [
-                  DropdownMenuItem(
-                      value: 'all', child: Text('All strategies')),
-                  DropdownMenuItem(
-                      value: 'site_window',
-                      child: Text('site_window')),
-                  DropdownMenuItem(
-                      value: 'pool_window',
-                      child: Text('pool_window')),
-                  DropdownMenuItem(
-                      value: 'fixed_times',
-                      child: Text('fixed_times')),
-                  DropdownMenuItem(
-                      value: 'daily_limit',
-                      child: Text('daily_limit')),
-                ],
-                onChanged: (v) {
-                  if (v == null) return;
-                  setState(() {
-                    _filterStrategy = v;
-                    _applyFilters();
-                  });
-                },
+              SizedBox(
+                width: 180,
+                child: DropdownButtonFormField2<String>(
+                  isExpanded: true,
+                  value: _filterStrategy,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    border: OutlineInputBorder(),
+                  ),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 260,
+                    decoration:
+                        BoxDecoration(color: BrandColors.background),
+                  ),
+                  menuItemStyleData:
+                      const MenuItemStyleData(height: 32),
+                  items: const [
+                    DropdownMenuItem(
+                        value: 'all', child: Text('All strategies')),
+                    DropdownMenuItem(
+                        value: 'site_window', child: Text('site_window')),
+                    DropdownMenuItem(
+                        value: 'pool_window', child: Text('pool_window')),
+                    DropdownMenuItem(
+                        value: 'fixed_times', child: Text('fixed_times')),
+                    DropdownMenuItem(
+                        value: 'daily_limit', child: Text('daily_limit')),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() {
+                      _filterStrategy = v;
+                      _applyFilters();
+                    });
+                  },
+                ),
               ),
             ],
           ),
@@ -1372,7 +1433,20 @@ class _PoolsTabState extends State<_PoolsTab> {
                             _headerCell('Site', siteW),
                             _headerCell('Load Type', loadTypeW),
                             _headerCell('Strategy', strategyW),
-                            _headerCell('Priority', priorityW),
+                            SizedBox(
+                              width: priorityW,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12),
+                                child: Text(
+                                  'Priority',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ),
                             _headerCell('Active', activeW),
                             _headerCell('Max/Day', maxBookW),
                             _headerCell('BH Excl', bankHolW),
@@ -1436,9 +1510,18 @@ class _PoolsTabState extends State<_PoolsTab> {
                                             p['slot_strategy'] ??
                                                 ''),
                                         strategyW),
-                                    _textCell(
-                                        '${p['priority'] ?? '—'}',
-                                        priorityW),
+                                    SizedBox(
+                                      width: priorityW,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12),
+                                        child: Text(
+                                          '${p['priority'] ?? '—'}',
+                                          textAlign: TextAlign.center,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ),
                                     _widgetCell(
                                         _activeBadge(
                                             p['active'] as bool? ??
@@ -1795,6 +1878,25 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
   List<Map<String, dynamic>> _assignments = [];
   List<Map<String, dynamic>> _pools = [];
   List<Map<String, dynamic>> _customers = [];
+  String _filterSite = 'all';
+
+  List<String> get _siteOptions {
+    final names = _pools
+        .map((p) => p['sites']?['site_name'] as String?)
+        .where((s) => s != null)
+        .cast<String>()
+        .toSet()
+        .toList()
+      ..sort();
+    return ['all', ...names];
+  }
+
+  List<Map<String, dynamic>> get _filteredPools {
+    if (_filterSite == 'all') return _pools;
+    return _pools
+        .where((p) => (p['sites']?['site_name'] as String?) == _filterSite)
+        .toList();
+  }
 
   @override
   void initState() {
@@ -1817,9 +1919,9 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
         withRetry(() => supabase
             .from('capacity_pools')
             .select(
-                'pool_id, display_name, site_id, sites(site_name)')
+                'pool_id, pool_name, display_name, site_id, sites(site_name)')
             .eq('active', true)
-            .order('display_name')),
+            .order('pool_name')),
         withRetry(() => supabase
             .from('customers')
             .select('customer_id, customer_name')
@@ -2011,12 +2113,14 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               const Text('Pool Assignment:',
                   style: TextStyle(
                       fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(width: 16),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: BrandColors.lightBlue,
@@ -2037,6 +2141,35 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
                   );
                 },
               ),
+              SizedBox(
+                width: 180,
+                child: DropdownButtonFormField2<String>(
+                  isExpanded: true,
+                  value: _filterSite,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    border: OutlineInputBorder(),
+                  ),
+                  dropdownStyleData: const DropdownStyleData(
+                    maxHeight: 300,
+                    decoration:
+                        BoxDecoration(color: BrandColors.background),
+                  ),
+                  menuItemStyleData:
+                      const MenuItemStyleData(height: 32),
+                  items: _siteOptions
+                      .map((s) => DropdownMenuItem(
+                          value: s,
+                          child: Text(s == 'all' ? 'All sites' : s)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() => _filterSite = v);
+                  },
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -2044,7 +2177,7 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: _pools
+                children: _filteredPools
                     .where((p) =>
                         grouped.containsKey(p['pool_id'].toString()))
                     .map((pool) {
@@ -2053,8 +2186,8 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
                   final mode = rows.isNotEmpty
                       ? rows.first['mode'] as String? ?? '—'
                       : '—';
-                  final displayName =
-                      pool['display_name'] as String? ?? '—';
+                  final poolName =
+                      _formatPoolName(pool['pool_name'] as String? ?? '');
                   final siteName =
                       pool['sites']?['site_name'] as String? ?? '—';
                   return Container(
@@ -2082,7 +2215,7 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  '$displayName — $siteName',
+                                  '$poolName — $siteName',
                                   style: const TextStyle(
                                       fontWeight: FontWeight.w600),
                                 ),
