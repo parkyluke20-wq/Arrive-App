@@ -102,7 +102,17 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
       }
 
       if (_siteFilter != 'all') {
-        query = query.eq('sites.site_name', _siteFilter);
+        final siteRow = await supabase
+            .from('sites')
+            .select('site_id')
+            .eq('site_name', _siteFilter)
+            .maybeSingle();
+        if (siteRow == null) {
+          debugPrint('_loadBookings: no site found for name "$_siteFilter"');
+          if (mounted) setState(() { _loading = false; _allBookings = []; });
+          return;
+        }
+        query = query.eq('site_id', siteRow['site_id'] as int);
       }
 
       if (!_customerFilter.contains('all')) {

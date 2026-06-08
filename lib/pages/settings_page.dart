@@ -124,6 +124,53 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _checking = true;
+  bool _regenerating = false;
+
+  Future<void> _regenerateSlots() async {
+    setState(() => _regenerating = true);
+    try {
+      final response = await supabase.functions.invoke(
+        'generate-slots',
+        body: {
+          'from_date': DateTime.now().toIso8601String(),
+          'to_date': DateTime.now()
+              .add(const Duration(days: 90))
+              .toIso8601String(),
+        },
+      );
+      if (!mounted) return;
+      if (response.status != 200) {
+        debugPrint(
+            'generate-slots failed: status=${response.status} data=${response.data}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  'Failed to regenerate slots (${response.status})')),
+        );
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Slots regenerated successfully.')),
+      );
+    } on FunctionException catch (e) {
+      debugPrint(
+          'FunctionException: status=${e.status} details=${e.details}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                'Failed to regenerate slots (${e.status}): ${e.details}')),
+      );
+    } catch (e) {
+      debugPrint('Unexpected error invoking generate-slots: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unexpected error: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _regenerating = false);
+    }
+  }
 
   @override
   void initState() {
@@ -191,6 +238,25 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 10, 24, 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  ElevatedButton.icon(
+                    icon: _regenerating
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.refresh, size: 16),
+                    label: const Text('Regenerate Slots'),
+                    onPressed: _regenerating ? null : _regenerateSlots,
+                  ),
+                ],
+              ),
+            ),
             const Expanded(
               child: TabBarView(
                 children: [
@@ -226,7 +292,10 @@ class _CustomersTabState extends State<_CustomersTab> {
   List<Map<String, dynamic>> _allCustomers = [];
   List<Map<String, dynamic>> _customers = [];
   List<Map<String, dynamic>> _sites = [];
+  List<Map<String, dynamic>> _customerSiteLinks = [];
   String _filterStatus = 'all';
+  int? _filterSiteId;
+  bool _hideSiteFilter = false;
   final _searchController = TextEditingController();
   String _search = '';
   String? _sortColumn;
@@ -264,11 +333,39 @@ class _CustomersTabState extends State<_CustomersTab> {
             .select('site_id, site_name')
             .eq('active', true)
             .order('site_name')),
+        withRetry(() => supabase
+            .from('customer_sites')
+            .select('customer_id, site_id')),
       ]);
+      if (!mounted) return;
+
+      int? autoSiteId;
+      bool hideSiteFilter = false;
+      final userId = supabase.auth.currentUser?.id;
+      if (userId != null) {
+        try {
+          final roleRows = await supabase
+              .from('user_roles')
+              .select('scope_type, scope_id')
+              .eq('user_id', userId);
+          final siteRoles = List<Map<String, dynamic>>.from(roleRows)
+              .where((r) => r['scope_type'] == 'site')
+              .toList();
+          if (siteRoles.length == 1 && siteRoles.first['scope_id'] != null) {
+            final raw = siteRoles.first['scope_id'];
+            autoSiteId = raw is int ? raw : int.tryParse(raw.toString());
+            hideSiteFilter = autoSiteId != null;
+          }
+        } catch (_) {}
+      }
+
       if (!mounted) return;
       setState(() {
         _allCustomers = List<Map<String, dynamic>>.from(results[0]);
         _sites = List<Map<String, dynamic>>.from(results[1]);
+        _customerSiteLinks = List<Map<String, dynamic>>.from(results[2]);
+        if (autoSiteId != null) _filterSiteId = autoSiteId;
+        _hideSiteFilter = hideSiteFilter;
         _applyFilters();
         _loading = false;
       });
@@ -287,6 +384,14 @@ class _CustomersTabState extends State<_CustomersTab> {
       filtered = filtered.where((c) => c['active'] == true).toList();
     } else if (_filterStatus == 'inactive') {
       filtered = filtered.where((c) => c['active'] == false).toList();
+    }
+    if (_filterSiteId != null) {
+      final linkedIds = _customerSiteLinks
+          .where((l) => l['site_id'] == _filterSiteId)
+          .map((l) => l['customer_id'])
+          .toSet();
+      filtered =
+          filtered.where((c) => linkedIds.contains(c['customer_id'])).toList();
     }
     if (_search.isNotEmpty) {
       final s = _search.toLowerCase();
@@ -429,6 +534,41 @@ class _CustomersTabState extends State<_CustomersTab> {
                   },
                 ),
               ),
+              if (!_hideSiteFilter)
+                SizedBox(
+                  width: 180,
+                  child: DropdownButtonFormField2<int?>(
+                    isExpanded: true,
+                    value: _filterSiteId,
+                    decoration: _fieldDecoration('Site'),
+                    dropdownStyleData: const DropdownStyleData(
+                      maxHeight: 300,
+                      decoration:
+                          BoxDecoration(color: BrandColors.background),
+                    ),
+                    menuItemStyleData:
+                        const MenuItemStyleData(height: 32),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('All sites'),
+                      ),
+                      ..._sites.map((s) => DropdownMenuItem<int?>(
+                            value: s['site_id'] as int,
+                            child: Text(
+                              s['site_name'] as String? ?? '—',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          )),
+                    ],
+                    onChanged: (v) {
+                      setState(() {
+                        _filterSiteId = v;
+                        _applyFilters();
+                      });
+                    },
+                  ),
+                ),
               SizedBox(
                 width: 260,
                 child: TextField(
@@ -1245,7 +1385,13 @@ class _PoolsTabState extends State<_PoolsTab> {
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _PoolModal(pool: pool, sites: _sites, onSaved: _load),
+      builder: (_) => _PoolModal(
+        pool: pool,
+        sites: _sites,
+        onSaved: _load,
+        onGoToOperatingHours: () =>
+            DefaultTabController.of(context).animateTo(4),
+      ),
     );
   }
 
@@ -1322,7 +1468,7 @@ class _PoolsTabState extends State<_PoolsTab> {
                   items: _siteOptions
                       .map((s) => DropdownMenuItem(
                           value: s,
-                          child: Text(s == 'all' ? 'All sites' : s)))
+                          child: Text(s == 'all' ? 'Select Site' : s)))
                       .toList(),
                   onChanged: (v) {
                     if (v == null) return;
@@ -1334,7 +1480,7 @@ class _PoolsTabState extends State<_PoolsTab> {
                 ),
               ),
               SizedBox(
-                width: 160,
+                width: 200,
                 child: DropdownButtonFormField2<String>(
                   isExpanded: true,
                   value: _filterActive,
@@ -1352,7 +1498,7 @@ class _PoolsTabState extends State<_PoolsTab> {
                   menuItemStyleData:
                       const MenuItemStyleData(height: 32),
                   items: const [
-                    DropdownMenuItem(value: 'all', child: Text('All')),
+                    DropdownMenuItem(value: 'all', child: Text('Select Status')),
                     DropdownMenuItem(
                         value: 'active', child: Text('Active only')),
                     DropdownMenuItem(
@@ -1368,7 +1514,7 @@ class _PoolsTabState extends State<_PoolsTab> {
                 ),
               ),
               SizedBox(
-                width: 180,
+                width: 210,
                 child: DropdownButtonFormField2<String>(
                   isExpanded: true,
                   value: _filterStrategy,
@@ -1387,7 +1533,7 @@ class _PoolsTabState extends State<_PoolsTab> {
                       const MenuItemStyleData(height: 32),
                   items: const [
                     DropdownMenuItem(
-                        value: 'all', child: Text('All strategies')),
+                        value: 'all', child: Text('Select Strategy')),
                     DropdownMenuItem(
                         value: 'site_window', child: Text('site_window')),
                     DropdownMenuItem(
@@ -1560,11 +1706,14 @@ class _PoolModal extends StatefulWidget {
   final Map<String, dynamic>? pool;
   final List<Map<String, dynamic>> sites;
   final VoidCallback onSaved;
+  final VoidCallback? onGoToOperatingHours;
 
-  const _PoolModal(
-      {required this.pool,
-      required this.sites,
-      required this.onSaved});
+  const _PoolModal({
+    required this.pool,
+    required this.sites,
+    required this.onSaved,
+    this.onGoToOperatingHours,
+  });
 
   @override
   State<_PoolModal> createState() => _PoolModalState();
@@ -1653,6 +1802,53 @@ class _PoolModalState extends State<_PoolModal> {
         }
       }
     }
+
+    // Guard: pool_window requires at least one pool_operating_hours row.
+    if (_isEdit && _slotStrategy == 'pool_window') {
+      final poolId = widget.pool!['pool_id'] as String;
+      List hoursCheck;
+      try {
+        hoursCheck = await supabase
+            .from('pool_operating_hours')
+            .select('pool_id')
+            .eq('pool_id', poolId)
+            .limit(1);
+      } catch (_) {
+        _snack("Couldn't verify pool hours — please try again.");
+        return;
+      }
+      if (!mounted) return;
+      if (hoursCheck.isEmpty) {
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: BrandColors.background,
+            title: const Text('Missing Pool Operating Hours'),
+            content: const Text(
+              'This pool has no operating hours defined. Please add pool '
+              'operating hours in Settings → Operating Hours before '
+              'using the Pool Window strategy.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.pop(context);
+                  widget.onGoToOperatingHours?.call();
+                },
+                child: const Text('Go to Operating Hours'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() => _submitting = true);
     final payload = {
       'display_name': displayName,
@@ -2162,7 +2358,7 @@ class _PoolAssignmentTabState extends State<_PoolAssignmentTab> {
                   items: _siteOptions
                       .map((s) => DropdownMenuItem(
                           value: s,
-                          child: Text(s == 'all' ? 'All sites' : s)))
+                          child: Text(s == 'all' ? 'Select Site' : s)))
                       .toList(),
                   onChanged: (v) {
                     if (v == null) return;
@@ -2396,13 +2592,13 @@ class _AddAssignmentModalState extends State<_AddAssignmentModal> {
                 value: _selectedPoolId,
                 decoration: _fieldDecoration('Pool *'),
                 items: widget.pools.map((p) {
-                  final displayName =
-                      p['display_name'] as String? ?? '—';
+                  final poolName =
+                      p['pool_name'] as String? ?? '—';
                   final siteName =
                       p['sites']?['site_name'] as String? ?? '—';
                   return DropdownMenuItem<String>(
                     value: p['pool_id'].toString(),
-                    child: Text('$displayName — $siteName',
+                    child: Text('$poolName — $siteName',
                         overflow: TextOverflow.ellipsis),
                   );
                 }).toList(),
@@ -2772,6 +2968,8 @@ class _SlotAvailabilityTabState extends State<_SlotAvailabilityTab> {
 
   Future<void> _toggleSlotVisible(
       Map<String, dynamic> slot, bool value) async {
+    final idx = _fixedSlots.indexOf(slot);
+    if (idx != -1) setState(() => _fixedSlots[idx] = {...slot, 'visible': value});
     try {
       await supabase
           .from('pool_fixed_slot_times')
@@ -2779,8 +2977,8 @@ class _SlotAvailabilityTabState extends State<_SlotAvailabilityTab> {
           .eq('pool_id', _selectedPoolId!)
           .eq('day_of_week_int', slot['day_of_week_int'])
           .eq('slot_time', slot['slot_time']);
-      await _loadPoolData(_selectedPoolId!);
     } catch (_) {
+      if (idx != -1) setState(() => _fixedSlots[idx] = slot);
       _snack("Couldn't update visibility — please try again.");
     }
   }
@@ -2945,7 +3143,7 @@ class _SlotAvailabilityTabState extends State<_SlotAvailabilityTab> {
               items: [
                 const DropdownMenuItem<String?>(
                   value: null,
-                  child: Text('All sites'),
+                  child: Text('Select Site'),
                 ),
                 ..._availableSites.map((s) => DropdownMenuItem<String?>(
                       value: s.id,
@@ -2976,7 +3174,7 @@ class _SlotAvailabilityTabState extends State<_SlotAvailabilityTab> {
             child: DropdownButtonFormField2<String>(
               isExpanded: true,
               value: _selectedPoolId,
-              decoration: _fieldDecoration('Select pool'),
+              decoration: _fieldDecoration('Select Pool'),
               items: _filteredPools.map((p) {
                 final formattedPoolName =
                     _formatPoolName(p['pool_name'] as String? ?? '');
@@ -3145,16 +3343,28 @@ class _SlotAvailabilityTabState extends State<_SlotAvailabilityTab> {
                 const EdgeInsets.symmetric(horizontal: 12),
             title: Text('$dayName (${slots.length} slot${slots.length == 1 ? '' : 's'})'),
             children: [
-              ...slots.map((s) {
+              ...slots.asMap().entries.map((entry) {
+                final i = entry.key;
+                final s = entry.value;
                 final slotTime =
                     _displayTime(s['slot_time'] as String);
                 final visible = s['visible'] as bool? ?? true;
-                return ListTile(
-                  dense: true,
-                  title: Text(slotTime),
-                  trailing: Row(
+                return Container(
+                  color: i.isOdd
+                      ? Colors.grey.shade50
+                      : Colors.transparent,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 2),
+                  alignment: Alignment.centerLeft,
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      SizedBox(
+                        width: 56,
+                        child: Text(slotTime,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w500)),
+                      ),
                       Text('Visible',
                           style: TextStyle(
                               fontSize: 12,
@@ -3217,6 +3427,10 @@ class _OperatingHoursTabState extends State<_OperatingHoursTab> {
   bool _loadingHours = false;
   String? _hoursError;
   List<Map<String, dynamic>> _hours = [];
+  List<Map<String, dynamic>> _pools = [];
+  Map<String, List<Map<String, dynamic>>> _poolHoursMap = {};
+  bool _loadingPoolHours = false;
+  String? _poolHoursError;
 
   @override
   void initState() {
@@ -3264,6 +3478,51 @@ class _OperatingHoursTabState extends State<_OperatingHoursTab> {
       setState(() {
         _loadingHours = false;
         _hoursError = "Couldn't load operating hours — $e";
+      });
+    }
+  }
+
+  Future<void> _loadPoolsAndHours(int siteId) async {
+    setState(() {
+      _loadingPoolHours = true;
+      _poolHoursError = null;
+      _pools = [];
+      _poolHoursMap = {};
+    });
+    try {
+      final poolsResult = await withRetry(() => supabase
+          .from('capacity_pools')
+          .select('pool_id, display_name, pool_name')
+          .eq('site_id', siteId)
+          .order('display_name'));
+      final pools = List<Map<String, dynamic>>.from(poolsResult);
+      final hoursMap = <String, List<Map<String, dynamic>>>{};
+      if (pools.isNotEmpty) {
+        final poolIds =
+            pools.map((p) => p['pool_id'] as String).toList();
+        final hoursResult = await withRetry(() => supabase
+            .from('pool_operating_hours')
+            .select(
+                'pool_id, day_of_week_int, day_of_week_text, open_time, close_time')
+            .inFilter('pool_id', poolIds));
+        final allHours = List<Map<String, dynamic>>.from(hoursResult);
+        for (final pool in pools) {
+          final pid = pool['pool_id'] as String;
+          hoursMap[pid] =
+              allHours.where((h) => h['pool_id'] == pid).toList();
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _pools = pools;
+        _poolHoursMap = hoursMap;
+        _loadingPoolHours = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingPoolHours = false;
+        _poolHoursError = "Couldn't load pool hours — $e";
       });
     }
   }
@@ -3423,6 +3682,249 @@ class _OperatingHoursTabState extends State<_OperatingHoursTab> {
     }
   }
 
+  Future<void> _showPoolHoursDialog({
+    Map<String, dynamic>? existing,
+    required String poolId,
+    required int dayInt,
+  }) async {
+    final dayName = _dayNames[dayInt] ?? 'Day';
+    TimeOfDay open = existing != null
+        ? _parseTime(existing['open_time'] as String)
+        : const TimeOfDay(hour: 8, minute: 0);
+    TimeOfDay close = existing != null
+        ? _parseTime(existing['close_time'] as String)
+        : const TimeOfDay(hour: 17, minute: 0);
+    String? err;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: BrandColors.background,
+          title: Text(
+              '${existing != null ? 'Edit' : 'Add'} Hours — $dayName'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Expanded(child: Text('Open time')),
+                  TextButton(
+                    onPressed: () async {
+                      final picked = await showTimePicker(
+                        context: ctx,
+                        initialTime: open,
+                      );
+                      if (picked != null) setLocal(() => open = picked);
+                    },
+                    child: Text(
+                        '${open.hour.toString().padLeft(2, '0')}:${open.minute.toString().padLeft(2, '0')}'),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  const Expanded(child: Text('Close time')),
+                  TextButton(
+                    onPressed: () async {
+                      final picked = await showTimePicker(
+                        context: ctx,
+                        initialTime: close,
+                      );
+                      if (picked != null)
+                        setLocal(() => close = picked);
+                    },
+                    child: Text(
+                        '${close.hour.toString().padLeft(2, '0')}:${close.minute.toString().padLeft(2, '0')}'),
+                  ),
+                ],
+              ),
+              if (err != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(err!,
+                      style: TextStyle(
+                          color: BrandColors.red, fontSize: 13)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final openMins = open.hour * 60 + open.minute;
+                final closeMins = close.hour * 60 + close.minute;
+                if (closeMins <= openMins) {
+                  setLocal(() =>
+                      err = 'Close time must be after open time.');
+                  return;
+                }
+                try {
+                  if (existing != null) {
+                    await supabase
+                        .from('pool_operating_hours')
+                        .update({
+                          'open_time': _formatTimeOfDay(open),
+                          'close_time': _formatTimeOfDay(close),
+                        })
+                        .eq('pool_id', poolId)
+                        .eq('day_of_week_int', dayInt);
+                  } else {
+                    await supabase
+                        .from('pool_operating_hours')
+                        .insert({
+                      'pool_id': poolId,
+                      'day_of_week_int': dayInt,
+                      'day_of_week_text': _dayNames[dayInt],
+                      'open_time': _formatTimeOfDay(open),
+                      'close_time': _formatTimeOfDay(close),
+                    });
+                  }
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _loadPoolsAndHours(_selectedSiteId!);
+                } on PostgrestException catch (e) {
+                  setLocal(() => err = _friendlyDbError(e));
+                } catch (_) {
+                  setLocal(
+                      () => err = "Couldn't save — please try again.");
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deletePoolHours(
+      String poolId, String displayName, int dayInt, String dayName) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: BrandColors.background,
+        title: const Text('Delete Pool Operating Hours'),
+        content: Text('Delete $dayName hours for $displayName?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: BrandColors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await supabase
+          .from('pool_operating_hours')
+          .delete()
+          .eq('pool_id', poolId)
+          .eq('day_of_week_int', dayInt);
+      await _loadPoolsAndHours(_selectedSiteId!);
+    } catch (_) {
+      _snack("Couldn't delete pool hours — please try again.");
+    }
+  }
+
+  Widget _buildPoolHoursCard(
+      String poolId,
+      String displayName,
+      List<Map<String, dynamic>> hours) {
+    final hoursMap = <int, Map<String, dynamic>>{};
+    for (final h in hours) {
+      hoursMap[h['day_of_week_int'] as int] = h;
+    }
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+          side: BorderSide(color: Colors.grey.shade300)),
+      color: BrandColors.background,
+      child: ExpansionTile(
+        tilePadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        title: Text(displayName,
+            style: const TextStyle(fontWeight: FontWeight.w500)),
+        subtitle: Text(
+          hours.isEmpty
+              ? 'No hours configured'
+              : '${hours.length} day(s) configured',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+        ),
+        children: _dayOrder.map((dayInt) {
+          final dayName = _dayNames[dayInt] ?? 'Day';
+          final existing = hoursMap[dayInt];
+          return Container(
+            margin: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 110,
+                  child: Text(dayName,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w500)),
+                ),
+                if (existing != null) ...[
+                  Expanded(
+                    child: Text(
+                      '${_displayTime(existing['open_time'] as String)}  –  ${_displayTime(existing['close_time'] as String)}',
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    color: BrandColors.orange,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                        minWidth: 28, minHeight: 28),
+                    onPressed: () => _showPoolHoursDialog(
+                        existing: existing,
+                        poolId: poolId,
+                        dayInt: dayInt),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete),
+                    color: BrandColors.red,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                        minWidth: 28, minHeight: 28),
+                    onPressed: () => _deletePoolHours(
+                        poolId, displayName, dayInt, dayName),
+                  ),
+                ] else ...[
+                  Expanded(
+                    child: Text('Not configured',
+                        style: TextStyle(
+                            color: Colors.grey.shade500)),
+                  ),
+                  TextButton(
+                    onPressed: () => _showPoolHoursDialog(
+                        poolId: poolId, dayInt: dayInt),
+                    child: const Text('Add'),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -3446,7 +3948,7 @@ class _OperatingHoursTabState extends State<_OperatingHoursTab> {
             child: DropdownButtonFormField2<int>(
               isExpanded: true,
               value: _selectedSiteId,
-              decoration: _fieldDecoration('Select site'),
+              decoration: _fieldDecoration('Select Site'),
               items: _sites
                   .map((s) => DropdownMenuItem<int>(
                         value: s['site_id'] as int,
@@ -3465,91 +3967,143 @@ class _OperatingHoursTabState extends State<_OperatingHoursTab> {
                 if (v == null) return;
                 setState(() => _selectedSiteId = v);
                 _loadHours(v);
+                _loadPoolsAndHours(v);
               },
             ),
           ),
           const SizedBox(height: 24),
           if (_selectedSiteId == null)
             const Text('Select a site above to view operating hours.')
-          else if (_loadingHours)
-            const Center(child: CircularProgressIndicator())
-          else if (_hoursError != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _hoursError!,
-                style: TextStyle(color: BrandColors.red),
-              ),
-            )
           else
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
-                  children: _dayOrder.map((dayInt) {
-                    final dayName = _dayNames[dayInt] ?? 'Day';
-                    final hoursMap = <int, Map<String, dynamic>>{};
-                    for (final h in _hours) {
-                      hoursMap[h['day_of_week_int'] as int] = h;
-                    }
-                    final existing = hoursMap[dayInt];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 4),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        border:
-                            Border.all(color: Colors.grey.shade300),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 110,
-                            child: Text(dayName,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w500)),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Site Hours',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    if (_loadingHours)
+                      const Center(
+                          child: CircularProgressIndicator())
+                    else if (_hoursError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          _hoursError!,
+                          style: TextStyle(color: BrandColors.red),
+                        ),
+                      )
+                    else
+                      ..._dayOrder.map((dayInt) {
+                        final dayName = _dayNames[dayInt] ?? 'Day';
+                        final hoursMap = <int, Map<String, dynamic>>{};
+                        for (final h in _hours) {
+                          hoursMap[h['day_of_week_int'] as int] = h;
+                        }
+                        final existing = hoursMap[dayInt];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(4),
                           ),
-                          if (existing != null) ...[
-                            Expanded(
-                              child: Text(
-                                '${_displayTime(existing['open_time'] as String)}  –  ${_displayTime(existing['close_time'] as String)}',
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 110,
+                                child: Text(dayName,
+                                    style: const TextStyle(
+                                        fontWeight:
+                                            FontWeight.w500)),
                               ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.edit),
-                              color: BrandColors.orange,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                  minWidth: 28, minHeight: 28),
-                              onPressed: () => _showHoursDialog(
-                                  existing: existing,
-                                  dayInt: dayInt),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete),
-                              color: BrandColors.red,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                  minWidth: 28, minHeight: 28),
-                              onPressed: () =>
-                                  _deleteHours(dayInt, dayName),
-                            ),
-                          ] else ...[
-                            Expanded(
-                              child: Text('Not configured',
-                                  style: TextStyle(
-                                      color: Colors.grey.shade500)),
-                            ),
-                            TextButton(
-                              onPressed: () =>
-                                  _showHoursDialog(dayInt: dayInt),
-                              child: const Text('Add'),
-                            ),
-                          ],
-                        ],
-                      ),
-                    );
-                  }).toList(),
+                              if (existing != null) ...[
+                                Expanded(
+                                  child: Text(
+                                    '${_displayTime(existing['open_time'] as String)}  –  ${_displayTime(existing['close_time'] as String)}',
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.edit),
+                                  color: BrandColors.orange,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                      minWidth: 28, minHeight: 28),
+                                  onPressed: () => _showHoursDialog(
+                                      existing: existing,
+                                      dayInt: dayInt),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete),
+                                  color: BrandColors.red,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                      minWidth: 28, minHeight: 28),
+                                  onPressed: () =>
+                                      _deleteHours(dayInt, dayName),
+                                ),
+                              ] else ...[
+                                Expanded(
+                                  child: Text('Not configured',
+                                      style: TextStyle(
+                                          color:
+                                              Colors.grey.shade500)),
+                                ),
+                                TextButton(
+                                  onPressed: () => _showHoursDialog(
+                                      dayInt: dayInt),
+                                  child: const Text('Add'),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      }),
+                    const SizedBox(height: 24),
+                    const Text('Pool Operating Hours',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    if (_loadingPoolHours)
+                      const Center(
+                          child: CircularProgressIndicator())
+                    else if (_poolHoursError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          _poolHoursError!,
+                          style: TextStyle(color: BrandColors.red),
+                        ),
+                      )
+                    else if (_pools.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'No pools configured for this site.',
+                          style: TextStyle(
+                              color: Colors.grey.shade500),
+                        ),
+                      )
+                    else
+                      ..._pools.map((pool) {
+                        final poolId = pool['pool_id'] as String;
+                        final displayName =
+                            pool['display_name'] as String? ??
+                                pool['pool_name'] as String? ??
+                                '—';
+                        return _buildPoolHoursCard(
+                          poolId,
+                          displayName,
+                          _poolHoursMap[poolId] ?? [],
+                        );
+                      }),
+                  ],
                 ),
               ),
             ),

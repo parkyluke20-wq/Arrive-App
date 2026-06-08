@@ -6,13 +6,26 @@ class NotificationProvider extends ChangeNotifier {
   NotificationProvider._();
 
   final List<AppNotification> _notifications = [];
+  bool _isLoading = false;
 
   List<AppNotification> get notifications => List.unmodifiable(_notifications);
+  bool get isLoading => _isLoading;
 
   int get unreadCount => _notifications.where((n) => !n.isRead).length;
 
-  void add(AppNotification notification) {
+  void setAll(List<AppNotification> notifications) {
+    _notifications.clear();
+    _notifications.addAll(notifications);
+    notifyListeners();
+  }
+
+  void prepend(AppNotification notification) {
     _notifications.insert(0, notification);
+    notifyListeners();
+  }
+
+  void setLoading(bool loading) {
+    _isLoading = loading;
     notifyListeners();
   }
 
@@ -35,6 +48,7 @@ class NotificationProvider extends ChangeNotifier {
   }
 
   void clear() {
+    _isLoading = false;
     if (_notifications.isEmpty) return;
     _notifications.clear();
     notifyListeners();

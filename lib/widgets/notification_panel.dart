@@ -35,7 +35,7 @@ class _NotificationPanelState extends State<NotificationPanel> {
     final bookingId = notification.bookingId;
     if (bookingId == null) return;
 
-    NotificationProvider.instance.markRead(notification.id);
+    NotificationService.instance.markRead(notification.id);
     final nav = Navigator.of(context);
     widget.onDismiss();
     nav.push(
@@ -82,8 +82,10 @@ class _NotificationPanelState extends State<NotificationPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final notifications = NotificationProvider.instance.notifications;
-    final unread = NotificationProvider.instance.unreadCount;
+    final provider = NotificationProvider.instance;
+    final notifications = provider.notifications;
+    final unread = provider.unreadCount;
+    final isLoading = provider.isLoading;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -110,7 +112,7 @@ class _NotificationPanelState extends State<NotificationPanel> {
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  onPressed: NotificationProvider.instance.markAllRead,
+                  onPressed: () => NotificationService.instance.markAllRead(),
                   child: const Text(
                     'Mark all read',
                     style: TextStyle(fontSize: 12),
@@ -123,28 +125,30 @@ class _NotificationPanelState extends State<NotificationPanel> {
         const Divider(height: 1),
 
         Expanded(
-          child: notifications.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No notifications',
-                    style: TextStyle(color: Colors.grey, fontSize: 14),
-                  ),
-                )
-              : ListView.separated(
-                  padding: EdgeInsets.zero,
-                  itemCount: notifications.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(height: 1, indent: 14, endIndent: 14),
-                  itemBuilder: (_, index) {
-                    final n = notifications[index];
-                    return _NotificationTile(
-                      notification: n,
-                      typeColor: _typeColor(n.type),
-                      typeIcon: _typeIcon(n.type),
-                      onTap: n.bookingId != null ? () => _openBooking(n) : null,
-                    );
-                  },
-                ),
+          child: isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : notifications.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No notifications',
+                        style: TextStyle(color: Colors.grey, fontSize: 14),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: EdgeInsets.zero,
+                      itemCount: notifications.length,
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, indent: 14, endIndent: 14),
+                      itemBuilder: (_, index) {
+                        final n = notifications[index];
+                        return _NotificationTile(
+                          notification: n,
+                          typeColor: _typeColor(n.type),
+                          typeIcon: _typeIcon(n.type),
+                          onTap: n.bookingId != null ? () => _openBooking(n) : null,
+                        );
+                      },
+                    ),
         ),
       ],
     );
@@ -234,6 +238,17 @@ class _NotificationTile extends StatelessWidget {
                           : FontWeight.w500,
                     ),
                   ),
+                  if (notification.customerName != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      notification.customerName!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: BrandColors.deepBlue,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 2),
                   Text(
                     _formatTime(notification.timestamp),
@@ -249,10 +264,23 @@ class _NotificationTile extends StatelessWidget {
   }
 
   String _formatTime(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
+    final now = DateTime.now();
+    final diff = now.difference(dt);
     if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inMinutes < 60) {
+      final m = diff.inMinutes;
+      return '$m minute${m == 1 ? '' : 's'} ago';
+    }
+    if (diff.inHours < 24) {
+      final h = diff.inHours;
+      return '$h hour${h == 1 ? '' : 's'} ago';
+    }
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final dtDay = DateTime(dt.year, dt.month, dt.day);
+    if (dtDay == yesterday) {
+      return 'Yesterday at ${DateFormat('HH:mm').format(dt)}';
+    }
     return DateFormat('dd/MM/yyyy HH:mm').format(dt);
   }
 }
