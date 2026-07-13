@@ -27,7 +27,7 @@ class UserSession {
         .select('scope_type')
         .eq('user_id', user.id)
         .eq('role', 'internal_admin')
-        .eq('scope_type', 'global');
+        .inFilter('scope_type', ['global', 'site']);
     return rows.isNotEmpty;
   }
 

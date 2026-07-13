@@ -8,6 +8,7 @@ import '../theme/brand_colors.dart';
 import '../controllers/booking_controller.dart';
 import '../services/booking_service.dart';
 import '../services/supabase_service.dart';
+import '../services/user_session.dart';
 import '../widgets/packing_list_widget.dart';
 import '../widgets/booking_activity_panel.dart';
 
@@ -82,6 +83,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
   bool _didLoadRouteArgs = false;
   bool loading = true;
   String? bookingStatus;
+  String? _effectiveRole;
+
+  bool get _canUpdateStatus =>
+      _effectiveRole == 'internal_admin' || _effectiveRole == 'internal_user';
   String? _reportToPool;
   final _activityPanelKey = GlobalKey<BookingActivityPanelState>();
 
@@ -207,6 +212,10 @@ class _BookingFormPageState extends State<BookingFormPage> {
       _loadCustomers(),
       _loadVehicleTypes(),
     ]);
+
+    try {
+      _effectiveRole = await UserSession.instance.getRole();
+    } catch (_) {}
 
     if (editingBookingId != null) {
       try {
@@ -511,6 +520,23 @@ class _BookingFormPageState extends State<BookingFormPage> {
                                                 foregroundColor: BrandColors.darkcharcoal,
                                               ),
                                             ),
+
+                                          if (isView &&
+                                              _canUpdateStatus &&
+                                              bookingStatus != 'received' &&
+                                              bookingStatus != 'cancelled' &&
+                                              bookingStatus != 'draft') ...[
+                                            const SizedBox(width: 12),
+                                            ElevatedButton.icon(
+                                              icon: const Icon(Icons.check_circle_outline, size: 18),
+                                              label: const Text('Update Status'),
+                                              onPressed: _openUpdateStatusDialog,
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.green.shade50,
+                                                foregroundColor: Colors.green,
+                                              ),
+                                            ),
+                                          ],
 
                                           const SizedBox(width: 12),
 
@@ -944,6 +970,144 @@ class _BookingFormPageState extends State<BookingFormPage> {
   );
 
   // ---------------- ACTIONS ----------------
+
+  Future<void> _openUpdateStatusDialog() async {
+    String selectedStatus = 'received';
+    DateTime? arrivalDate;
+    TimeOfDay? arrivalTime;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: BrandColors.background,
+          title: const Text('Update Booking Status'),
+          content: StatefulBuilder(
+            builder: (context, setLocalState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButton<String>(
+                    value: selectedStatus,
+                    items: const [
+                      DropdownMenuItem(value: 'received', child: Text('Received')),
+                      DropdownMenuItem(value: 'no_show', child: Text('No Show')),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setLocalState(() { selectedStatus = value; });
+                    },
+                  ),
+                  if (selectedStatus == 'received') ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final now = DateTime.now();
+                          final today = DateTime(now.year, now.month, now.day);
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: today,
+                            firstDate: today.subtract(const Duration(days: 365)),
+                            lastDate: today,
+                          );
+                          if (picked != null) {
+                            setLocalState(() { arrivalDate = picked; });
+                          }
+                        },
+                        child: Text(
+                          arrivalDate == null
+                              ? 'Select Arrival Date'
+                              : 'Date: ${arrivalDate!.day}/${arrivalDate!.month}/${arrivalDate!.year}',
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final picked = await showTimePicker(
+                            context: context,
+                            initialTime: TimeOfDay.now(),
+                          );
+                          if (picked != null) {
+                            setLocalState(() { arrivalTime = picked; });
+                          }
+                        },
+                        child: Text(
+                          arrivalTime == null
+                              ? 'Select Arrival Time'
+                              : 'Arrival: ${arrivalTime!.format(context)}',
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (selectedStatus == 'received' &&
+                    (arrivalDate == null || arrivalTime == null)) {
+                  return;
+                }
+
+                DateTime? arrivedAt;
+                if (selectedStatus == 'received') {
+                  final pickedDate = arrivalDate!;
+                  final pickedTime = arrivalTime!;
+                  arrivedAt = DateTime(
+                    pickedDate.year,
+                    pickedDate.month,
+                    pickedDate.day,
+                    pickedTime.hour,
+                    pickedTime.minute,
+                  );
+                  if (arrivedAt.isAfter(DateTime.now())) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Arrival time cannot be in the future")),
+                    );
+                    return;
+                  }
+                }
+
+                try {
+                  await supabase
+                      .from('bookings')
+                      .update({
+                        'status': selectedStatus,
+                        'arrived_at': arrivedAt?.toIso8601String(),
+                      })
+                      .eq('booking_id', editingBookingId!);
+
+                  if (!mounted) return;
+
+                  Navigator.pop(context);
+                  setState(() => bookingStatus = selectedStatus);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Booking status updated')),
+                  );
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Couldn't update booking status — please try again")),
+                  );
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _handleClose() {
     // Priority 1: return to previous page (preserves state)
     if (Navigator.canPop(context)) {

@@ -380,8 +380,7 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
       _carrierCtrl.text.trim().isNotEmpty &&
       _referenceCtrl.text.trim().isNotEmpty &&
       _packingListFiles.isNotEmpty &&
-      !_resolvingPool &&
-      _poolError == null;
+      !_resolvingPool;
 
   void _showConfirmDialog() {
     final pageContext = context;
@@ -603,9 +602,9 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
 
                     const SizedBox(height: 24),
 
-                    // Pool error
+                    // Pool warning (non-blocking — booking will still be created without a pool)
                     if (!_resolvingPool && _poolError != null) ...[
-                      _errorBox(_poolError!),
+                      _warningBox('No pool matched — booking will be created without a pool assignment.'),
                       const SizedBox(height: 12),
                     ],
 
@@ -825,6 +824,20 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
         child: Text(
           message,
           style: TextStyle(color: Colors.red.shade800),
+        ),
+      );
+
+  Widget _warningBox(String message) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade50,
+          border: Border.all(color: Colors.amber.shade300),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          message,
+          style: TextStyle(color: Colors.amber.shade900),
         ),
       );
 

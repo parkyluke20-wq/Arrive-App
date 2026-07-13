@@ -501,6 +501,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
   Future<void> _openUpdateStatusDialog(
       Map<String, dynamic> booking) async {
     String selectedStatus = 'received';
+    DateTime? arrivalDate;
     TimeOfDay? arrivalTime;
 
     await showDialog(
@@ -533,16 +534,39 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                     },
                   ),
 
-                  if (selectedStatus == 'received')
+                  if (selectedStatus == 'received') ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 16),
                       child: ElevatedButton(
                         onPressed: () async {
-                          final picked =
-                              await showTimePicker(
+                          final now = DateTime.now();
+                          final today = DateTime(now.year, now.month, now.day);
+                          final picked = await showDatePicker(
                             context: context,
-                            initialTime:
-                                TimeOfDay.now(),
+                            initialDate: today,
+                            firstDate: today.subtract(const Duration(days: 365)),
+                            lastDate: today,
+                          );
+                          if (picked != null) {
+                            setLocalState(() {
+                              arrivalDate = picked;
+                            });
+                          }
+                        },
+                        child: Text(
+                          arrivalDate == null
+                              ? 'Select Arrival Date'
+                              : 'Date: ${arrivalDate!.day}/${arrivalDate!.month}/${arrivalDate!.year}',
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final picked = await showTimePicker(
+                            context: context,
+                            initialTime: TimeOfDay.now(),
                           );
                           if (picked != null) {
                             setLocalState(() {
@@ -557,6 +581,7 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
                         ),
                       ),
                     ),
+                  ],
                 ],
               );
             },
@@ -569,29 +594,28 @@ class _AllBookingsPageState extends State<AllBookingsPage> {
             ),
             ElevatedButton(
               onPressed: () async {
-                if (selectedStatus ==
-                        'received' &&
-                    arrivalTime == null) {
+                if (selectedStatus == 'received' &&
+                    (arrivalDate == null || arrivalTime == null)) {
                   return;
                 }
 
-                final startTime =
-                    DateTime.parse(
-                        booking['start_time']);
-
                 DateTime? arrivedAt;
                 if (selectedStatus == 'received') {
-                  final pickedTime = arrivalTime;
-                  if (pickedTime == null) return;
-                  final startTime =
-                      DateTime.parse(booking['start_time']);
+                  final pickedDate = arrivalDate!;
+                  final pickedTime = arrivalTime!;
                   arrivedAt = DateTime(
-                    startTime.year,
-                    startTime.month,
-                    startTime.day,
+                    pickedDate.year,
+                    pickedDate.month,
+                    pickedDate.day,
                     pickedTime.hour,
                     pickedTime.minute,
                   );
+                  if (arrivedAt.isAfter(DateTime.now())) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Arrival time cannot be in the future")),
+                    );
+                    return;
+                  }
                 }
 
                 try {
