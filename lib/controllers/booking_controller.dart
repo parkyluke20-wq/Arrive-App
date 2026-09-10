@@ -17,7 +17,6 @@ class BookingController extends ChangeNotifier {
   }) : availabilityService = BookingAvailabilityService(supabase);
 
   // ---------------- STATE ----------------
-  bool _isHydrating = false;
   int? selectedCustomer;
   int? selectedSite;
 
@@ -84,7 +83,6 @@ class BookingController extends ChangeNotifier {
   // ---------------- AVAILABILITY ----------------
 
   Future<void> computeBookableDates() async {
-    if (_isHydrating) return;
     if (supabase.auth.currentSession == null) {
       return;
     }
@@ -170,7 +168,6 @@ class BookingController extends ChangeNotifier {
   }
 
   Future<void> computeStartTimes() async {
-    if (_isHydrating) return;
     if (selectedCustomer == null ||
         selectedSite == null ||
         selectedVehicleType == null ||
@@ -251,63 +248,6 @@ class BookingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<HydratedBookingResult> hydrateForEdit({
-    required String bookingId,
-    required List<dynamic> vehicleTypes,
-  }) async {
-    try {
-      final row = await supabase
-          .from('bookings')
-          .select(
-            'booking_id, customer_id, site_id, vehicle_type_id, pool_id, '
-            'start_time, end_time, reference, carrier, vehicle_reg, '
-            'container_number, qty_pallets, qty_cases, booking_date, status'
-          )
-          .eq('booking_id', bookingId)
-          .single();
-
-      if (row['status'] == 'cancelled') {
-        return HydratedBookingResult.invalidDate(booking: row);
-      }
-
-      selectedCustomer = row['customer_id'];
-      selectedSite = row['site_id'];
-
-      selectedVehicleType = vehicleTypes.firstWhere(
-        (v) => v.vehicleTypeId == row['vehicle_type_id'],
-      );
-
-      final DateTime storedStart =
-        DateTime.parse(row['start_time']);
-
-      selectedDate = DateTime(
-        storedStart.year,
-        storedStart.month,
-        storedStart.day,
-      );
-
-      selectedStartTime = storedStart;
-
-      // Restore pool mapping so selectedPoolId is available during editing.
-      final restoredPoolId = row['pool_id']?.toString();
-      if (restoredPoolId != null) {
-        _startTimePoolMap = {storedStart: restoredPoolId};
-      }
-
-      notifyListeners();
-      _isHydrating = false;
-
-      return HydratedBookingResult.success(
-        restoredDate: selectedDate!,
-        restoredStartTime: selectedStartTime!,
-        booking: row,
-      );
-    } catch (e) {
-      _isHydrating = false;
-      return HydratedBookingResult.invalidDate();
-    }
-  }
-
   // ---------------- HELPERS ----------------
 
   void _clearDateAndTime() {
@@ -341,57 +281,4 @@ class BookingController extends ChangeNotifier {
   void restorePoolForTime(DateTime startTime, String poolId) {
     _startTimePoolMap = {startTime: poolId};
   }
-}
-
-// ---------------- RESULT MODEL ----------------
-
-class HydratedBookingResult {
-  final bool success;
-  final DateTime? restoredDate;
-  final DateTime? restoredStartTime;
-  final Map<String, dynamic>? booking;
-  final String? reason;
-
-  HydratedBookingResult._(
-    this.success,
-    this.restoredDate,
-    this.restoredStartTime,
-    this.booking,
-    this.reason,
-  );
-
-  factory HydratedBookingResult.success({
-    required DateTime restoredDate,
-    required DateTime restoredStartTime,
-    required Map<String, dynamic> booking,
-  }) =>
-      HydratedBookingResult._(
-        true,
-        restoredDate,
-        restoredStartTime,
-        booking,
-        null,
-      );
-
-  factory HydratedBookingResult.invalidDate({
-    Map<String, dynamic>? booking, // optional so you still have row data
-  }) =>
-      HydratedBookingResult._(
-        false,
-        null,
-        null,
-        booking,
-        'Stored booking date is no longer available',
-      );
-
-  factory HydratedBookingResult.invalidTime({
-    Map<String, dynamic>? booking,
-  }) =>
-      HydratedBookingResult._(
-        false,
-        null,
-        null,
-        booking,
-        'Stored booking time is no longer available',
-      );
 }

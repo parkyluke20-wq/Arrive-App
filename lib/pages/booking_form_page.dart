@@ -252,7 +252,7 @@ class _BookingFormPageState extends State<BookingFormPage> {
         );
 
         final DateTime storedStart =
-            DateTime.parse(row['start_time']);
+            DateTime.parse(row['start_time']).toLocal();
 
         final DateTime restoredDate = DateTime(
           storedStart.year,
@@ -261,14 +261,21 @@ class _BookingFormPageState extends State<BookingFormPage> {
         );
 
         bookingController.selectedDate = restoredDate;
-
-        bookingController.availableStartTimes
-          ..clear()
-          ..add(storedStart);
-
         bookingController.selectedStartTime = storedStart;
 
+        // Pull real availability for this date, same as create mode, so the
+        // Time dropdown offers every open slot instead of just the stored one.
+        // computeStartTimes() re-inserts selectedStartTime at index 0 if the
+        // fetched list doesn't contain it, so the booking's current slot stays
+        // selectable even if slot_availability_projection doesn't independently
+        // mark it "available" (see note on self-exclusion below).
+        await bookingController.computeStartTimes();
+
         // Restore pool mapping so selectedPoolId is correct when saving.
+        // Applied AFTER computeStartTimes(), because that call replaces the
+        // whole pool map with the query results — if the view doesn't exclude
+        // this booking's own row and reports its slot as taken, it won't be in
+        // that map, and this restores it so saving still uses the right pool.
         final restoredPoolId = row['pool_id']?.toString();
         if (restoredPoolId != null) {
           bookingController.restorePoolForTime(storedStart, restoredPoolId);
