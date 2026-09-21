@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../constants/app_constants.dart';
@@ -53,18 +54,25 @@ class BookingAvailabilityService {
     required int siteId,
     required DateTime from,
     required DateTime to,
+    Set<String>? poolIds,
   }) async {
     final fromIso = from.toIso8601String();
     final toIso = to.toIso8601String();
 
-    final response = await withRetry(() => supabase
-      .from('slot_availability_projection')
-      .select('pool_id, slot_start, slot_status, visible')
-      .eq('site_id', siteId)
-      .gte('slot_start', fromIso)
-      .lt('slot_start', toIso)
-      .order('slot_start', ascending: true)
-      .range(0, AppConstants.maxSlotQueryLimit));
+    var query = supabase
+        .from('slot_availability_projection')
+        .select('pool_id, slot_start, slot_status, visible')
+        .eq('site_id', siteId)
+        .gte('slot_start', fromIso)
+        .lt('slot_start', toIso);
+
+    if (poolIds != null) {
+      query = query.inFilter('pool_id', poolIds.toList());
+    }
+
+    final response = await withRetry(() => query
+        .order('slot_start', ascending: true)
+        .range(0, AppConstants.maxSlotQueryLimit));
 
     final result = List<Map<String, dynamic>>.from(response).map((r) {
       return {
@@ -75,8 +83,13 @@ class BookingAvailabilityService {
       };
     }).toList();
 
-    assert(result.length < AppConstants.maxSlotQueryLimit,
-        'Slot query hit the limit — review maxSlotQueryLimit in AppConstants');
+    if (result.length >= AppConstants.maxSlotQueryLimit) {
+      debugPrint(
+          'BookingAvailabilityService.availabilityRows: row cap hit — '
+          'siteId=$siteId poolCount=${poolIds?.length ?? "unfiltered"} '
+          'rowsReturned=${result.length} limit=${AppConstants.maxSlotQueryLimit} '
+          'range=[$fromIso, $toIso) — results are truncated, review maxSlotQueryLimit');
+    }
 
     return result;
   }

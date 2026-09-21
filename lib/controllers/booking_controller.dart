@@ -123,6 +123,7 @@ class BookingController extends ChangeNotifier {
       siteId: selectedSite!,
       from: from,
       to: to,
+      poolIds: pools,
     );
     final poolConfigsFuture = availabilityService.fetchPoolConfigs(pools);
     final dailyCountsFuture = availabilityService.fetchDailyBookingCounts(
@@ -208,6 +209,7 @@ class BookingController extends ChangeNotifier {
       siteId: selectedSite!,
       from: from,
       to: to,
+      poolIds: pools,
     );
 
     _slotVisibilityByPool.clear();
