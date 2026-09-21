@@ -1168,7 +1168,9 @@ class _BookingFormPageState extends State<BookingFormPage> {
         referenceController.text.trim().isNotEmpty &&
         carrierController.text.trim().isNotEmpty &&
         hasQty &&
-        (_hasExistingPackingLists || _packingListFiles.isNotEmpty);
+        (_hasExistingPackingLists || _packingListFiles.isNotEmpty) &&
+        (bookingController.selectedVehicleType?.loadType == 'loose' ||
+            bookingController.selectedPoolId != null);
   }
 
   Future<String?> _checkCustomerDailyQuota() async {

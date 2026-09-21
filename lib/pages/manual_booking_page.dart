@@ -380,7 +380,9 @@ class _ManualBookingPageState extends State<ManualBookingPage> {
       _carrierCtrl.text.trim().isNotEmpty &&
       _referenceCtrl.text.trim().isNotEmpty &&
       _packingListFiles.isNotEmpty &&
-      !_resolvingPool;
+      !_resolvingPool &&
+      _poolError == null &&
+      (_vehicleType!.loadType == 'loose' || _poolId != null);
 
   void _showConfirmDialog() {
     final pageContext = context;
